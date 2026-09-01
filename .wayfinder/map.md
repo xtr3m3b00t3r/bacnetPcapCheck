@@ -19,7 +19,7 @@ A small, fast Rust CLI (`bacnet-pcapcheck <in.pcap> -o report.pdf`) that reads a
 
 <!-- the index: one line per closed ticket, enough to judge relevance, then zoom the link for the detail the ticket holds -->
 
-- No decisions yet.
+- [Name the top 10 issues](https://github.com/xtr3m3b00t3r/bacnetPcapCheck/issues/2): chose the 10 pcap-diagnosable problems a field engineer most wants, ranked — duplicate device IDs, broadcast/Who-Is storms, unresponsive devices, duplicate BBMDs/forwarding loops, incomplete BDT, foreign-device registration failure, segmentation misuse, unicast I-Am, routing rejections, confirmed-service retransmissions. Full report at `.wayfinder/assets/001-top-10-issues.md`.
 
 ## Not yet specified
 
