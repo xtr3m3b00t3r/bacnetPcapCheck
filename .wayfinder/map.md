@@ -20,6 +20,7 @@ A small, fast Rust CLI (`bacnet-pcapcheck <in.pcap> -o report.pdf`) that reads a
 <!-- the index: one line per closed ticket, enough to judge relevance, then zoom the link for the detail the ticket holds -->
 
 - [Name the top 10 issues](https://github.com/xtr3m3b00t3r/bacnetPcapCheck/issues/2): chose the 10 pcap-diagnosable problems a field engineer most wants, ranked — duplicate device IDs, broadcast/Who-Is storms, unresponsive devices, duplicate BBMDs/forwarding loops, incomplete BDT, foreign-device registration failure, segmentation misuse, unicast I-Am, routing rejections, confirmed-service retransmissions. Full report at `.wayfinder/assets/001-top-10-issues.md`.
+- [The BACnet crate choice](https://github.com/xtr3m3b00t3r/bacnetPcapCheck/issues/5): the BACnet decoding seam builds on **bacnet-rs 0.3.1** (`default-features=false, features=["std"]`). Prototype over 3610 real BACnet/IP payloads: bacnet-rs decoded 99.75% with typed Who-Is/I-Am/ReadProperty service bodies in-crate, leanest active dep set (29, no async), vs rusty-bacnet (99.2%, heavier) and bacnet_parse (insufficient — no confirmed-service classification). Hand-rolling not worth it. See `prototype/crate-comparison/COMPARISON.md`.
 
 ## Not yet specified
 

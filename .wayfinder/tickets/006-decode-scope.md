@@ -3,7 +3,7 @@
 - **Type**: `wayfinder:grilling`
 - **Status**: open
 - **Claimed by**: (unclaimed)
-- **Blocked by**: `004-bacnet-crate-choice`, `001-top-10-issues`
+- **Blocked by**: `001-top-10-issues` (was also blocked by `004-bacnet-crate-choice`; that resolved 2026-09-01 — decode seam is bacnet-rs 0.3.1)
 - **Blocks**: (none)
 
 ## Question

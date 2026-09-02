@@ -1,8 +1,8 @@
 # 004 - The BACnet crate choice
 
 - **Type**: `wayfinder:prototype`
-- **Status**: open
-- **Claimed by**: (unclaimed)
+- **Status**: closed (resolved 2026-09-01)
+- **Resolution**: use `bacnet-rs` 0.3.1 with `default-features=false, features=["std"]` for the BACnet decoding seam.
 - **Blocks**: `002-finding-schema`, `006-decode-scope`
 
 ## Question
@@ -16,3 +16,5 @@ Build a cheap prototype taking a representative set of real BACnet/IP packets an
 ## Deliverable
 
 A working prototype on these packets, comparing the candidates, with a recommendation; the chosen approach unblocks the decode-scope ticket.
+
+**Done 2026-09-01:** prototype `prototype/crate-comparison/` (commit `13f0668`, branch `prototype/crate-choice`) compared the candidates over 3610 real BACnet/IP payloads. bacnet-rs 0.3.1 won on decode rate (99.75%), typed service bodies in-crate, lean deps (29, no async), and active maintenance. rusty-bacnet is a near-equal but heavier 50-dep client/server stack; bacnet_parse is insufficient (no confirmed-service classification, Who-Is/I-Am unreliable). Full write-up: `prototype/crate-comparison/COMPARISON.md`. Resolution comment: <https://github.com/xtr3m3b00t3r/bacnetPcapCheck/issues/5#issuecomment-5502368436>.
