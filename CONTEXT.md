@@ -29,3 +29,7 @@ These are the four testable seams of the system.
 - **APDU** — Application-layer protocol data unit, the payload of a BACnet message.
 - **NPDU** — Network-layer protocol data unit, the routing header.
 - **BVLC** — BACnet Virtual Link Control, the BACnet/IP encapsulation header.
+- **Invoke ID** — The correlation token carried by confirmed BACnet services: a request and its response, abort, or reject share it. Detection correlates exchanges on it.
+- **Directed Who-Is** — A unicast Who-Is sent to one specific device. A unicast I-Am answering a directed Who-Is is correct; a unicast I-Am answering broadcast context is the violation unicast-I-Am detection targets.
+- **Evidence floor** — The minimum number of relevant messages (and, for rate-based rules, capture span) a detection rule requires before it may produce a finding. Below the floor the rule stays silent.
+- **Broadcast context** — A frame sent to the limited broadcast address, or to a subnet-directed broadcast address inferred from the capture's own address population. I-Am and Who-Is behaviour is judged against it.
