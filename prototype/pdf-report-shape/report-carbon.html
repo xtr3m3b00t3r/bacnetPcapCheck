@@ -3,13 +3,14 @@
   PROTOTYPE — throwaway. Answers part of wayfinder ticket #6:
   "Can the report be HTML styled with the Carbon Design System, and how does it read?"
 
-  Single static HTML file + Carbon's compiled CSS (@carbon/styles, Apache-2.0) from
-  a CDN + ~20 lines of JS for the accordion toggles. No build step, no framework:
-  this is exactly what the Rust core could emit as a string.
+  Single static HTML file + Carbon's compiled CSS (@carbon/styles 1.114, Apache-2.0)
+  from a CDN + a 6-line JS accordion toggle. No build step, no framework — this is
+  what the Rust core could emit as a string. IBM Plex fonts load from IBM's CDN via
+  the @font-face rules inside styles.css (online); falls back to system sans offline.
 
   Open in a browser. Ctrl+P → "Save as PDF" to judge print.
-  Delivery caveat: for offline field use the 892KB Carbon CSS must be inlined
-  (or subset) into the file; the Rust core would ship it as an asset.
+  Delivery caveat: for offline field use the 892 KB Carbon CSS + fonts must be
+  inlined (or subset) — the Rust core would ship them as assets.
 -->
 <html lang="en">
 <head>
@@ -18,286 +19,442 @@
 <title>BACnet Network Health Report — plant-floor-chiller-loop.pcapng</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@carbon/styles@1.114.0/css/styles.min.css">
 <style>
-  /* Prototype-local layout rules — kept minimal; everything else is Carbon */
-  body { background: #f4f4f4; margin: 0; }
-  .page { max-width: 1056px; margin: 0 auto; padding: 0 16px 48px; }
-  .shell-header { background: #161616; color: #f4f4f4; }
-  .shell-header__inner { max-width: 1056px; margin: 0 auto; padding: 14px 16px; display: flex; align-items: baseline; gap: 16px; }
-  .shell-header__title { font-size: 14px; font-weight: 600; }
-  .shell-header__meta { font-size: 12px; color: #c6c6c6; margin-left: auto; }
-  .bluf { background: #ffffff; border: 1px solid #e0e0e0; border-top: 4px solid #da1e28; padding: 24px; margin: 24px 0 0; }
-  .bluf__line { font-size: 20px; line-height: 1.4; font-weight: 600; margin: 0 0 12px; }
-  .bluf__stats { color: #525252; font-size: 13px; }
-  section.report { margin-top: 48px; }
-  .finding-device { color: #525252; font-size: 12px; }
-  .evidence-meta { color: #6f6f6f; font-size: 12px; }
-  ol.remediation { padding-left: 24px; margin: 8px 0 0; }
-  ol.remediation li { font-size: 14px; line-height: 1.6; margin-bottom: 4px; }
-  .devices-list { margin: 8px 0 0; padding-left: 20px; font-size: 13px; color: #393939; }
-  /* Print: expand accordions, page-break sanity, drop the screen chrome */
+  /* ---- Prototype-local layout only. Everything visual is Carbon tokens. ---- */
+  :root { --page-max: 72rem; }
+
+  body { background: var(--cds-background, #f4f4f4); color: var(--cds-text-primary, #161616); margin: 0; }
+
+  /* App-style header, Carbon g100 */
+  .rpt-header { background: #161616; color: #f4f4f4; }
+  .rpt-header__inner { max-width: var(--page-max); margin: 0 auto; padding: 0.875rem 1rem; display: flex; align-items: baseline; gap: 1rem; }
+  .rpt-header__product { font-size: 0.875rem; font-weight: 600; letter-spacing: 0.16px; }
+  .rpt-header__meta { margin-left: auto; font-size: 0.75rem; color: #c6c6c6; }
+
+  /* Carbon CSS grid needs its column count set (the React Grid does this too) */
+  .rpt-grid { --cds-grid-columns: 16; max-width: var(--page-max); margin: 0 auto; padding-bottom: 3rem; }
+
+  /* Type per Carbon type scale */
+  .rpt-h2 { font-size: var(--cds-heading-03-font-size, 1.25rem); font-weight: var(--cds-heading-03-font-weight, 400); line-height: var(--cds-heading-03-line-height, 1.29); letter-spacing: 0; margin: 2rem 0 0.5rem; }
+  .rpt-label { font-size: var(--cds-label-01-font-size, 0.75rem); font-weight: 600; letter-spacing: 0.32px; color: var(--cds-text-secondary, #525252); margin: 1rem 0 0.25rem; }
+  .rpt-muted { font-size: var(--cds-label-01-font-size, 0.75rem); color: var(--cds-text-secondary, #525252); }
+
+  /* BLUF block: white layer with a critical left edge */
+  .rpt-bluf { background: var(--cds-layer, #f4f4f4); border-inline-start: 4px solid #da1e28; padding: 1.5rem; margin-top: 2rem; }
+  .rpt-bluf__line { font-size: var(--cds-heading-04-font-size, 1.75rem); font-weight: 400; line-height: 1.29; margin: 0 0 1rem; }
+  .rpt-bluf__line strong { font-weight: 600; }
+  .rpt-bluf__stats { font-size: var(--cds-label-01-font-size, 0.75rem); color: var(--cds-text-secondary, #525252); }
+
+  .rpt-section { margin-top: 3rem; }
+
+  /* Severity tag inside fix-list table cells and accordion titles */
+  .rpt-sev { white-space: nowrap; }
+  .rpt-finding-title { display: flex; align-items: center; gap: 0.75rem; }
+  .rpt-finding-meta { margin: 0.25rem 0 0.75rem; font-size: var(--cds-label-01-font-size, 0.75rem); color: var(--cds-text-secondary, #525252); }
+  .rpt-finding-meta strong { color: var(--cds-text-primary, #161616); font-weight: 600; }
+  .rpt-evidence { font-size: var(--cds-body-02-font-size, 0.875rem); line-height: 1.43; max-width: 60rem; }
+  .rpt-frames { font-size: var(--cds-label-01-font-size, 0.75rem); color: #6f6f6f; margin-top: 0.25rem; }
+  ol.rpt-steps { margin: 0.5rem 0 0; padding-left: 1.5rem; max-width: 60rem; }
+  ol.rpt-steps li { font-size: var(--cds-body-01-font-size, 0.875rem); line-height: 1.43; margin-bottom: 0.25rem; }
+  ul.rpt-devices { margin: 0.25rem 0 0; padding-left: 1.25rem; font-size: var(--cds-body-01-font-size, 0.875rem); }
+  ul.rpt-devices li { margin-bottom: 0.125rem; }
+
+  /* Accordion: collapsed by default, Carbon compiled CSS hides .cds--accordion__wrapper
+     unless the item is --active. Keep heading title on one line with the tag. */
+  .cds--accordion { margin-top: 0.5rem; }
+  .cds--accordion__title { display: flex; align-items: center; gap: 0.75rem; }
+  .cds--accordion__title .cds--tag { flex: 0 0 auto; margin-left: 0; }
+
+  /* Print: real A4 page, expanded findings, page-break hygiene */
   @media print {
+    @page { size: A4; margin: 18mm 16mm; }
     body { background: #fff; }
-    .shell-header { display: none; }
-    .cds--accordion__item--active .cds--accordion__content { display: block; }
-    .finding { break-inside: avoid; }
-    .report h2 { break-after: avoid; }
+    .rpt-header { display: none; }
+    .rpt-grid { padding-bottom: 0; }
+    .cds--accordion__wrapper { display: block !important; max-block-size: none !important; opacity: 1 !important; overflow: visible !important; }
+    .cds--accordion__heading { pointer-events: none; }
+    .cds--accordion__item { break-inside: avoid-page; }
+    .rpt-h2 { break-after: avoid; }
+    .rpt-bluf, .rpt-section { margin-top: 1rem; }
+    a.cds--link { text-decoration: none; color: inherit; }
   }
 </style>
 </head>
 <body>
 
-<header class="shell-header">
-  <div class="shell-header__inner">
-    <span class="shell-header__title">BACnet Network Health Report</span>
-    <span class="shell-header__meta">plant-floor-chiller-loop.pcapng · 2026-09-04 08:42–09:17</span>
+<header class="rpt-header">
+  <div class="rpt-header__inner">
+    <span class="rpt-header__product">BACnet Network Health Report</span>
+    <span class="rpt-header__meta">plant-floor-chiller-loop.pcapng · 2026-09-04 08:42 – 09:17</span>
   </div>
 </header>
 
-<main class="page">
+<div class="cds--css-grid rpt-grid">
+  <div class="cds--css-grid-column cds--col-span-16">
 
-  <!-- ============ BLUF ============ -->
-  <div class="bluf">
-    <p class="bluf__line">
-      10 findings: 2 critical, 3 major, 4 warning, 1 info.
-      Device 101 is duplicated on the network, the BBMD pair at 192.168.40.x is forwarding-looping,
-      and Who-Is broadcasts carry 94% of all traffic. Fix the criticals first.
-    </p>
-    <div class="bluf__stats">
-      Capture: plant-floor-chiller-loop.pcapng · 18,442 frames over 35 min 26 s · 14 devices ·
-      431 frames (2.3%) undecodable.
+    <!-- ============ BLUF ============ -->
+    <div class="rpt-bluf">
+      <p class="rpt-bluf__line">
+        <strong>10 findings: 2 critical, 3 major, 4 warning, 1 info.</strong>
+        Device 101 is duplicated on the network, the BBMD pair at 192.168.40.x is
+        forwarding-looping, and Who-Is broadcasts carry 94% of all traffic.
+        Fix the criticals first.
+      </p>
+      <div class="rpt-bluf__stats">
+        Capture: plant-floor-chiller-loop.pcapng · 18,442 frames over 35 min 26 s ·
+        14 devices seen · 431 frames (2.3%) undecodable
+      </div>
     </div>
+
+    <!-- Capture-health warning — rendered only when >50% of frames are undecodable;
+         shown here so the print/screen treatment can be judged. -->
+    <div class="cds--inline-notification cds--inline-notification--low-contrast cds--inline-notification--warning" style="margin-top:1rem" role="status">
+      <div class="cds--inline-notification__details">
+        <div class="cds--inline-notification__icon">
+          <svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4 2 28h28Zm-2 8h4v8h-4Zm0 10h4v4h-4Z"/></svg>
+        </div>
+        <div class="cds--inline-notification__text-wrapper">
+          <p class="cds--inline-notification__title">Capture-health warning</p>
+          <p class="cds--inline-notification__subtitle">More than half of the frames in this capture could not be decoded as BACnet. Findings rest on the remainder — re-capture with a BACnet/IP filter before trusting an absence of findings.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ FIX LIST ============ -->
+    <section class="rpt-section">
+      <h2 class="rpt-h2">Fix list</h2>
+      <p class="rpt-muted">Work top to bottom. Order is severity, not the order things were found.</p>
+
+      <div class="cds--data-table-container" style="margin-top:0.75rem">
+        <table class="cds--data-table" style="width:100%">
+          <thead>
+            <tr>
+              <th style="width:2.5rem"><span class="cds--visually-hidden">Done</span></th>
+              <th style="width:7rem">Severity</th>
+              <th>Issue</th>
+              <th style="width:10rem">Where</th>
+              <th style="width:28rem">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-1" class="cds--checkbox" type="checkbox" value="1"><label for="cb-1" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--red rpt-sev">CRITICAL</span></td>
+              <td><a class="cds--link" href="#f-duplicate-device-id">Duplicate device instance number</a></td>
+              <td>Device 101</td>
+              <td>Renumber one of the two devices claiming instance 101</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-2" class="cds--checkbox" type="checkbox" value="2"><label for="cb-2" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--red rpt-sev">CRITICAL</span></td>
+              <td><a class="cds--link" href="#f-duplicate-bbmd">Duplicate BBMD / forwarding loop</a></td>
+              <td>Network-wide</td>
+              <td>Take one of the two BBMDs out of service or correct its BDT</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-3" class="cds--checkbox" type="checkbox" value="3"><label for="cb-3" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--magenta rpt-sev">MAJOR</span></td>
+              <td><a class="cds--link" href="#f-broadcast-storm">Who-Is broadcast storm</a></td>
+              <td>Network-wide</td>
+              <td>Throttle the Who-Is re-broadcast rate on six devices</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-4" class="cds--checkbox" type="checkbox" value="4"><label for="cb-4" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--magenta rpt-sev">MAJOR</span></td>
+              <td><a class="cds--link" href="#f-unresponsive-device">Unresponsive device</a></td>
+              <td>Device 310</td>
+              <td>Inspect device 310's application layer for a full request queue</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-5" class="cds--checkbox" type="checkbox" value="5"><label for="cb-5" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--magenta rpt-sev">MAJOR</span></td>
+              <td><a class="cds--link" href="#f-incomplete-bdt">Incomplete BDT on BBMD</a></td>
+              <td>Network-wide</td>
+              <td>Add the missing 192.168.60.x entry to the BBMD's BDT</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-6" class="cds--checkbox" type="checkbox" value="6"><label for="cb-6" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span></td>
+              <td><a class="cds--link" href="#f-segmentation-misuse">Segmentation misuse</a></td>
+              <td>Device 205</td>
+              <td>Align advertised segmentation support with request size</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-7" class="cds--checkbox" type="checkbox" value="7"><label for="cb-7" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span></td>
+              <td><a class="cds--link" href="#f-unicast-i-am">Unicast I-Am without directed Who-Is</a></td>
+              <td>Device 322</td>
+              <td>Correct I-Am response mode to broadcast-only</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-8" class="cds--checkbox" type="checkbox" value="8"><label for="cb-8" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span></td>
+              <td><a class="cds--link" href="#f-foreign-device-registration-failure">Foreign-device registration failure</a></td>
+              <td>Device 407</td>
+              <td>Raise the BBMD's foreign-device table limit</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-9" class="cds--checkbox" type="checkbox" value="9"><label for="cb-9" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span></td>
+              <td><a class="cds--link" href="#f-confirmed-retransmission">Confirmed-service retransmission</a></td>
+              <td>Device 118 → 415</td>
+              <td>Shorten responder latency or widen the APDU timeout</td>
+            </tr>
+            <tr>
+              <td data-previous-value="Row"><div class="cds--checkbox-wrapper"><input id="cb-10" class="cds--checkbox" type="checkbox" value="10"><label for="cb-10" class="cds--checkbox-label" aria-label="Mark done"></label></div></td>
+              <td><span class="cds--tag cds--tag--cool-gray rpt-sev">INFO</span></td>
+              <td><a class="cds--link" href="#f-routing-rejection">Routing rejection</a></td>
+              <td>Router 192.168.20.1</td>
+              <td>Find the client still routing to DNET 77 and remove the stale route</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ FINDINGS ============ -->
+    <section class="rpt-section">
+      <h2 class="rpt-h2">Findings</h2>
+      <p class="rpt-muted">Each finding: what we saw, the frames that prove it, and the steps to fix it. Critical findings are expanded; the rest collapse.</p>
+
+      <ul class="cds--accordion">
+
+        <li class="cds--accordion__item cds--accordion__item--active" id="f-duplicate-device-id">
+          <button class="cds--accordion__heading" type="button" aria-expanded="true" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--red rpt-sev">CRITICAL</span>
+              Duplicate device instance number
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Device 101 @ 192.168.10.24:47808 · Device 101 @ 192.168.10.87:47808 · 61 I-Am frames from two addresses</p>
+              <p class="rpt-evidence">Two distinct IP addresses answered I-Am with device instance 101 within 40 s (frames 412 and 458). ReadProperty requests addressed to instance 101 received conflicting replies from both addresses for the rest of the capture.</p>
+              <p class="rpt-frames">Frames: 412, 458, 2210, 4997, 11023 (+56 more) · First seen 08:43:12 — last seen 09:16:58</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Physically locate both devices answering as instance 101 (192.168.10.24 and 192.168.10.87).</li>
+                <li>Check the device-ID dip switch / configuration on each and renumber the newer replacement to a free instance.</li>
+                <li>Power-cycle the renumbered device and confirm a single I-Am for instance 101 on the next capture.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item cds--accordion__item--active" id="f-duplicate-bbmd">
+          <button class="cds--accordion__heading" type="button" aria-expanded="true" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--red rpt-sev">CRITICAL</span>
+              Duplicate BBMD / forwarding loop
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> BBMD @ 192.168.40.10:47808 · BBMD @ 192.168.40.11:47808 · 23 looped broadcasts</p>
+              <p class="rpt-evidence">The same original broadcast NPDU reappeared on subnet 192.168.10.x five times with a decrementing hop count, each lap tagged from alternating BBMD addresses 192.168.40.10 and 192.168.40.11. Both advertise an identical BDT entry for 192.168.20.255.</p>
+              <p class="rpt-frames">Frames: 1880, 1902, 1927, 1955, 1988 (+18 more) · First seen 08:51:04 — last seen 09:15:41</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Confirm which of 192.168.40.10 / 192.168.40.11 is the commissioned BBMD.</li>
+                <li>Disable the BBMD function on the other unit, or correct the duplicated BDT entry for 192.168.20.255.</li>
+                <li>Verify forwarding stops looping by re-capturing for 10 minutes.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-broadcast-storm">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--magenta rpt-sev">MAJOR</span>
+              Who-Is broadcast storm
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> 6 devices on 192.168.10.x (52, 77, 214, 330, 401, 512) · 8,212 Who-Is broadcasts (3.9/s)</p>
+              <p class="rpt-evidence">Who-Is broadcasts carried 94% of all BACnet traffic in the capture, sustained at 3.9/s over the full 35 minutes. Six devices on 192.168.10.x re-broadcast the same Who-Is range at 2–5 s intervals. Undecodable traffic is 2.3% — the storm itself is fully decodable BVLC/NPDU traffic, so the volume is real, not a decoding gap.</p>
+              <p class="rpt-frames">Frames: 205, 611, 1029, 1477, 1901 (+8,207 more) · First seen 08:42:31 — last seen 09:17:35</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>On each of the six listed devices, increase the Who-Is retry/back-off interval to ≥30 s.</li>
+                <li>Replace broad-range Who-Is (0–4194303) with directed reads where the controller config supports it.</li>
+                <li>Re-capture after changes; the Who-Is share of BACnet traffic should fall below 20%.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-unresponsive-device">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--magenta rpt-sev">MAJOR</span>
+              Unresponsive device
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Device 310 @ 192.168.12.31:47808 · 44 unanswered confirmed requests</p>
+              <p class="rpt-evidence">44 ReadProperty requests to device 310 were never answered (invoke IDs 0x1F, 0x2A, 0x33 and 41 others); the longest silent wait was 9.8 s. The device answers broadcast Who-Is but drops confirmed traffic.</p>
+              <p class="rpt-frames">Frames: 5310, 5488, 6122, 6670, 7204 (+39 more) · First seen 08:57:19 — last seen 09:17:30</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Ping 192.168.12.31 and confirm the device is still on the network.</li>
+                <li>Read the controller's service queue / connection count; a saturated queue drops confirmed requests.</li>
+                <li>Reboot the device if the queue stays full; check its firmware revision against the vendor's list of known BACnet stack defects.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-incomplete-bdt">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--magenta rpt-sev">MAJOR</span>
+              Incomplete BDT on BBMD
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> BBMD @ 192.168.40.10:47808 · Subnet 192.168.60.x (missing) · 23 missing forwards</p>
+              <p class="rpt-evidence">The BDT read from BBMD 192.168.40.10 lists 2 of the 3 site subnets; 192.168.60.x is absent. Broadcasts originating on 192.168.60.x were never seen on the other two subnets, while 23 such broadcasts were captured on the source subnet itself.</p>
+              <p class="rpt-frames">Frames: 8830, 8901, 9110, 9412, 9987 (+18 more) · First seen 09:01:22 — last seen 09:16:44</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Open the BBMD configuration on 192.168.40.10 and read the current BDT.</li>
+                <li>Add a BDT entry for 192.168.60.x (mask 255.255.255.0) pointing at the third subnet's BBMD or broadcast address.</li>
+                <li>Confirm a Who-Is issued on 192.168.60.x now appears on subnets 192.168.10.x and 192.168.20.x.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-segmentation-misuse">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span>
+              Segmentation misuse
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Device 205 @ 192.168.11.5:47808 · 127 aborts</p>
+              <p class="rpt-evidence">Device 205 advertises max-NPDU 480 bytes but requests objects needing 1,497-byte replies. 127 exchange aborts (abort-reason buffer-capacity) follow, and no segmented transfer is ever negotiated.</p>
+              <p class="rpt-frames">Frames: 3102, 3388, 3640, 4011, 4390 (+122 more) · First seen 08:49:02 — last seen 09:14:10</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Set device 205's max-APDU / segmentation config to match its real capability, or move it to a client that requests small properties.</li>
+                <li>If the device supports segmentation, enable 'segmented responses both' on it and its peers.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-unicast-i-am">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span>
+              Unicast I-Am without directed Who-Is
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Device 322 @ 192.168.10.92:47808 · 18 unicast I-Ams</p>
+              <p class="rpt-evidence">Device 322 sent unicast I-Am messages to 192.168.10.1 after broadcast Who-Is frames. None of the 18 followed a directed (unicast) Who-Is, so the receiver's table is being primed by a reply it did not ask for.</p>
+              <p class="rpt-frames">Frames: 7450, 7602, 7719, 7888, 8011 (+13 more) · First seen 08:55:47 — last seen 09:12:03</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Check device 322's BACnet configuration for a 'directed I-Am' / unicast-response option and disable it.</li>
+                <li>Confirm on the next capture that I-Am frames from 322 are sent to 192.168.10.255.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-foreign-device-registration-failure">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span>
+              Foreign-device registration failure
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Device 407 @ 192.168.60.7:47808 · BBMD @ 192.168.40.10:47808 · 6 of 12 registrations rejected</p>
+              <p class="rpt-evidence">Device 407 attempted to register as a foreign device with BBMD 192.168.40.10 twelve times (TTL 300 s); six attempts were answered with BVLC-Result nack (result 0x0010). The BBMD's foreign-device table appears to be full at 128 entries.</p>
+              <p class="rpt-frames">Frames: 12044, 12188, 12402, 12566, 12871 (+7 more) · First seen 09:06:15 — last seen 09:15:52</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Read the BBMD's foreign-device table; clear entries with expired TTLs.</li>
+                <li>Raise the table limit if the site intentionally supports more than 128 foreign devices, then confirm device 407's next registration succeeds (BVLC-Result success).</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-confirmed-retransmission">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--warm-gray rpt-sev">WARNING</span>
+              Confirmed-service retransmission
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Device 118 @ 192.168.11.18:47808 (sender) · Device 415 @ 192.168.13.15:47808 (responder) · 9 retransmissions on one invoke ID</p>
+              <p class="rpt-evidence">Device 118 retransmitted the same ReadProperty (invoke ID 0x44) nine times at ~3 s intervals; device 415 answered each only after the fourth try. Retransmissions are attributed to the sender, the silence to the responder.</p>
+              <p class="rpt-frames">Frames: 13340, 13405, 13471, 13538, 13604 (+4 more) · First seen 09:08:41 — last seen 09:08:59</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Check device 415 for a busy schedule (point writes, COV floods) that delays its replies.</li>
+                <li>Raise device 118's APDU timeout from ~3 s to 6–10 s so slow-but-correct answers are not re-asked.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+        <li class="cds--accordion__item" id="f-routing-rejection">
+          <button class="cds--accordion__heading" type="button" aria-expanded="false" onclick="toggleAccordion(this)">
+            <p class="cds--accordion__title">
+              <span class="cds--tag cds--tag--cool-gray rpt-sev">INFO</span>
+              Routing rejection
+            </p>
+            <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
+          </button>
+          <div class="cds--accordion__wrapper">
+            <div class="cds--accordion__content">
+              <p class="rpt-finding-meta"><strong>Affected:</strong> Router @ 192.168.20.1 · DNET 77 (unreachable) · 5 rejections</p>
+              <p class="rpt-evidence">Five NPDU reject-message-to-network frames from router 192.168.20.1 give reason 0x02 (network unreachable) for DNET 77. No device ever answered on DNET 77, so the route appears decommissioned but still referenced by clients on 192.168.20.x.</p>
+              <p class="rpt-frames">Frames: 15210, 15288, 15991, 16402, 17005 · First seen 09:10:12 — last seen 09:13:55</p>
+              <p class="rpt-label">What to do</p>
+              <ol class="rpt-steps">
+                <li>Identify the device on 192.168.20.x sending to DNET 77 (check the frames listed).</li>
+                <li>Remove or repoint its DNET 77 route entry; confirm the rejections stop.</li>
+              </ol>
+            </div>
+          </div>
+        </li>
+
+      </ul>
+    </section>
+
   </div>
+</div>
 
-  <div class="cds--inline-notification cds--inline-notification--low-contrast cds--inline-notification--warning" style="margin-top:8px">
-    <div class="cds--inline-notification__details">
-      <svg focusable="false" preserveAspectRatio="xMidYMid meet" style="will-change:transform;opacity:1" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4 2 28h28zM14 12h4v8h-4zm0 10h4v4h-4z" fill="#f1c21b"></path></svg>
-      <div class="cds--inline-notification__text-wrapper">
-        <p class="cds--inline-notification__title">Capture-health warning</p>
-        <p class="cds--inline-notification__subtitle">Rendered only when more than 50% of frames are undecodable — shown here so you can judge it. In this capture 2.3% were undecodable.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- ============ FIX LIST (severity order) ============ -->
-  <section class="report">
-    <h2>Fix list</h2>
-    <p class="finding-device">Work top to bottom. Order is severity, not the order things were found.</p>
-    <table class="cds--data-table" style="width:100%">
-      <thead>
-        <tr>
-          <th></th><th>Severity</th><th>Issue</th><th>Where</th><th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--red">CRITICAL</span></td><td><a class="cds--link" href="#f-duplicate-device-id">Duplicate device instance number</a></td><td>Device 101</td><td>Renumber one of the two devices claiming instance 101</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--red">CRITICAL</span></td><td><a class="cds--link" href="#f-duplicate-bbmd">Duplicate BBMD / forwarding loop</a></td><td>Network</td><td>Take one of the two BBMDs out of service or correct its BDT</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--magenta">MAJOR</span></td><td><a class="cds--link" href="#f-broadcast-storm">Who-Is broadcast storm</a></td><td>Network</td><td>Throttle the Who-Is re-broadcast rate on six devices</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--magenta">MAJOR</span></td><td><a class="cds--link" href="#f-unresponsive-device">Unresponsive device</a></td><td>Device 310</td><td>Inspect device 310's application layer for a full request queue</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--magenta">MAJOR</span></td><td><a class="cds--link" href="#f-incomplete-bdt">Incomplete BDT on BBMD</a></td><td>Network</td><td>Add the missing 192.168.60.x entry to the BBMD's BDT</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--warm-gray">WARNING</span></td><td><a class="cds--link" href="#f-segmentation-misuse">Segmentation misuse</a></td><td>Device 205</td><td>Align advertised segmentation support with request size</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--warm-gray">WARNING</span></td><td><a class="cds--link" href="#f-unicast-i-am">Unicast I-Am without directed Who-Is</a></td><td>Device 322</td><td>Correct I-Am response mode to broadcast-only</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--warm-gray">WARNING</span></td><td><a class="cds--link" href="#f-foreign-device-registration-failure">Foreign-device registration failure</a></td><td>Device 407</td><td>Raise the BBMD's foreign-device table limit</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--warm-gray">WARNING</span></td><td><a class="cds--link" href="#f-confirmed-retransmission">Confirmed-service retransmission</a></td><td>Device 118 → 415</td><td>Shorten responder latency or widen the APDU timeout</td></tr>
-        <tr><td><input type="checkbox"></td><td><span class="cds--tag cds--tag--cool-gray">INFO</span></td><td><a class="cds--link" href="#f-routing-rejection">Routing rejection</a></td><td>Router 192.168.20.1</td><td>Find the client still routing to DNET 77 and remove the stale route</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- ============ FINDINGS ============ -->
-  <section class="report">
-    <h2>Findings</h2>
-    <p class="finding-device">Each finding: what we saw, the frames that prove it, and the steps to fix it. Critical findings are expanded; the rest collapse.</p>
-
-    <div class="cds--accordion">
-
-      <div class="cds--accordion__item cds--accordion__item--active" id="f-duplicate-device-id">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="true">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Duplicate device instance number</p>
-          <span class="cds--tag cds--tag--red" style="margin-left:auto">CRITICAL</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Device 101 @ 192.168.10.24:47808 · Device 101 @ 192.168.10.87:47808 · 61 I-Am frames from two addresses</p>
-          <p>Two distinct IP addresses answered I-Am with device instance 101 within 40 s (frames 412 and 458). ReadProperty requests addressed to instance 101 received conflicting replies from both addresses for the rest of the capture.</p>
-          <p class="evidence-meta">Frames: 412, 458, 2210, 4997, 11023 (+56 more) · First seen 08:43:12 — last seen 09:16:58</p>
-          <p><strong>What to do:</strong> Renumber one of the two devices claiming instance 101.</p>
-          <ol class="remediation">
-            <li>Physically locate both devices answering as instance 101 (192.168.10.24 and 192.168.10.87).</li>
-            <li>Check the device-ID dip switch / configuration on each and renumber the newer replacement to a free instance.</li>
-            <li>Power-cycle the renumbered device and confirm a single I-Am for instance 101 on the next capture.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item cds--accordion__item--active" id="f-duplicate-bbmd">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="true">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Duplicate BBMD / forwarding loop</p>
-          <span class="cds--tag cds--tag--red" style="margin-left:auto">CRITICAL</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: BBMD @ 192.168.40.10:47808 · BBMD @ 192.168.40.11:47808 · 23 looped broadcasts</p>
-          <p>The same original broadcast NPDU reappeared on subnet 192.168.10.x five times with a decrementing hop count, each lap tagged from alternating BBMD addresses 192.168.40.10 and 192.168.40.11. Both advertise an identical BDT entry for 192.168.20.255.</p>
-          <p class="evidence-meta">Frames: 1880, 1902, 1927, 1955, 1988 (+18 more) · First seen 08:51:04 — last seen 09:15:41</p>
-          <p><strong>What to do:</strong> Take one of the two BBMDs out of service or correct its BDT.</p>
-          <ol class="remediation">
-            <li>Confirm which of 192.168.40.10 / 192.168.40.11 is the commissioned BBMD.</li>
-            <li>Disable the BBMD function on the other unit, or correct the duplicated BDT entry for 192.168.20.255.</li>
-            <li>Verify forwarding stops looping by re-capturing for 10 minutes.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-broadcast-storm">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Who-Is broadcast storm</p>
-          <span class="cds--tag cds--tag--magenta" style="margin-left:auto">MAJOR</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: 6 devices on 192.168.10.x (52, 77, 214, 330, 401, 512) · 8,212 Who-Is broadcasts (3.9/s)</p>
-          <p>Who-Is broadcasts carried 94% of all BACnet traffic in the capture, sustained at 3.9/s over the full 35 minutes. Six devices on 192.168.10.x re-broadcast the same Who-Is range at 2–5 s intervals. Undecodable traffic is 2.3% — the storm itself is fully decodable BVLC/NPDU traffic, so the volume is real, not a decoding gap.</p>
-          <p class="evidence-meta">Frames: 205, 611, 1029, 1477, 1901 (+8,207 more) · First seen 08:42:31 — last seen 09:17:35</p>
-          <p><strong>What to do:</strong> Throttle the Who-Is re-broadcast rate on the six named devices.</p>
-          <ol class="remediation">
-            <li>On each of the six listed devices, increase the Who-Is retry/back-off interval to ≥30 s.</li>
-            <li>Replace broad-range Who-Is (0–4194303) with directed reads where the controller config supports it.</li>
-            <li>Re-capture after changes; the Who-Is share of BACnet traffic should fall below 20%.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-unresponsive-device">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Unresponsive device</p>
-          <span class="cds--tag cds--tag--magenta" style="margin-left:auto">MAJOR</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Device 310 @ 192.168.12.31:47808 · 44 unanswered confirmed requests</p>
-          <p>44 ReadProperty requests to device 310 were never answered (invoke IDs 0x1F, 0x2A, 0x33 and 41 others); the longest silent wait was 9.8 s. The device answers broadcast Who-Is but drops confirmed traffic.</p>
-          <p class="evidence-meta">Frames: 5310, 5488, 6122, 6670, 7204 (+39 more) · First seen 08:57:19 — last seen 09:17:30</p>
-          <p><strong>What to do:</strong> Inspect device 310's application layer for a full request queue.</p>
-          <ol class="remediation">
-            <li>Ping 192.168.12.31 and confirm the device is still on the network.</li>
-            <li>Read the controller's service queue / connection count; a saturated queue drops confirmed requests.</li>
-            <li>Reboot the device if the queue stays full; check its firmware revision against the vendor's list of known BACnet stack defects.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-incomplete-bdt">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Incomplete BDT on BBMD</p>
-          <span class="cds--tag cds--tag--magenta" style="margin-left:auto">MAJOR</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: BBMD @ 192.168.40.10:47808 · Subnet 192.168.60.x (missing) · 23 missing forwards</p>
-          <p>The BDT read from BBMD 192.168.40.10 lists 2 of the 3 site subnets; 192.168.60.x is absent. Broadcasts originating on 192.168.60.x were never seen on the other two subnets, while 23 such broadcasts were captured on the source subnet itself.</p>
-          <p class="evidence-meta">Frames: 8830, 8901, 9110, 9412, 9987 (+18 more) · First seen 09:01:22 — last seen 09:16:44</p>
-          <p><strong>What to do:</strong> Add the missing 192.168.60.x entry to the BBMD's BDT.</p>
-          <ol class="remediation">
-            <li>Open the BBMD configuration on 192.168.40.10 and read the current BDT.</li>
-            <li>Add a BDT entry for 192.168.60.x (mask 255.255.255.0) pointing at the third subnet's BBMD or broadcast address.</li>
-            <li>Confirm a Who-Is issued on 192.168.60.x now appears on subnets 192.168.10.x and 192.168.20.x.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-segmentation-misuse">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Segmentation misuse</p>
-          <span class="cds--tag cds--tag--warm-gray" style="margin-left:auto">WARNING</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Device 205 @ 192.168.11.5:47808 · 127 aborts</p>
-          <p>Device 205 advertises max-NPDU 480 bytes but requests objects needing 1,497-byte replies. 127 exchange aborts (abort-reason buffer-capacity) follow, and no segmented transfer is ever negotiated.</p>
-          <p class="evidence-meta">Frames: 3102, 3388, 3640, 4011, 4390 (+122 more) · First seen 08:49:02 — last seen 09:14:10</p>
-          <p><strong>What to do:</strong> Align device 205's advertised segmentation support with its request size.</p>
-          <ol class="remediation">
-            <li>Set device 205's max-APDU / segmentation config to match its real capability, or move it to a client that requests small properties.</li>
-            <li>If the device supports segmentation, enable 'segmented responses both' on it and its peers.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-unicast-i-am">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Unicast I-Am without directed Who-Is</p>
-          <span class="cds--tag cds--tag--warm-gray" style="margin-left:auto">WARNING</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Device 322 @ 192.168.10.92:47808 · 18 unicast I-Ams</p>
-          <p>Device 322 sent unicast I-Am messages to 192.168.10.1 after broadcast Who-Is frames. None of the 18 followed a directed (unicast) Who-Is, so the receiver's table is being primed by a reply it did not ask for.</p>
-          <p class="evidence-meta">Frames: 7450, 7602, 7719, 7888, 8011 (+13 more) · First seen 08:55:47 — last seen 09:12:03</p>
-          <p><strong>What to do:</strong> Correct device 322's I-Am response mode to broadcast-only.</p>
-          <ol class="remediation">
-            <li>Check device 322's BACnet configuration for a 'directed I-Am' / unicast-response option and disable it.</li>
-            <li>Confirm on the next capture that I-Am frames from 322 are sent to 192.168.10.255.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-foreign-device-registration-failure">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Foreign-device registration failure</p>
-          <span class="cds--tag cds--tag--warm-gray" style="margin-left:auto">WARNING</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Device 407 @ 192.168.60.7:47808 · BBMD @ 192.168.40.10:47808 · 6 of 12 registrations rejected</p>
-          <p>Device 407 attempted to register as a foreign device with BBMD 192.168.40.10 twelve times (TTL 300 s); six attempts were answered with BVLC-Result nack (result 0x0010). The BBMD's foreign-device table appears to be full at 128 entries.</p>
-          <p class="evidence-meta">Frames: 12044, 12188, 12402, 12566, 12871 (+7 more) · First seen 09:06:15 — last seen 09:15:52</p>
-          <p><strong>What to do:</strong> Raise the BBMD's foreign-device table limit or clear stale registrations.</p>
-          <ol class="remediation">
-            <li>Read the BBMD's foreign-device table; clear entries with expired TTLs.</li>
-            <li>Raise the table limit if the site intentionally supports more than 128 foreign devices, then confirm device 407's next registration succeeds (BVLC-Result success).</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-confirmed-retransmission">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Confirmed-service retransmission</p>
-          <span class="cds--tag cds--tag--warm-gray" style="margin-left:auto">WARNING</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Device 118 @ 192.168.11.18:47808 (sender) · Device 415 @ 192.168.13.15:47808 (responder) · 9 retransmissions on one invoke ID</p>
-          <p>Device 118 retransmitted the same ReadProperty (invoke ID 0x44) nine times at ~3 s intervals; device 415 answered each only after the fourth try. Retransmissions are attributed to the sender, the silence to the responder.</p>
-          <p class="evidence-meta">Frames: 13340, 13405, 13471, 13538, 13604 (+4 more) · First seen 09:08:41 — last seen 09:08:59</p>
-          <p><strong>What to do:</strong> Shorten device 415's response latency or widen device 118's APDU timeout.</p>
-          <ol class="remediation">
-            <li>Check device 415 for a busy schedule (point writes, COV floods) that delays its replies.</li>
-            <li>Raise device 118's APDU timeout from ~3 s to 6–10 s so slow-but-correct answers are not re-asked.</li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="cds--accordion__item" id="f-routing-rejection">
-        <button class="cds--accordion__heading" onclick="this.parentElement.classList.toggle('cds--accordion__item--active')" aria-expanded="false">
-          <svg class="cds--accordion__arrow" focusable="false" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M11 8 6 3 5 4l4 4-4 4 1 1z"/></svg>
-          <p class="cds--accordion__title">Routing rejection</p>
-          <span class="cds--tag cds--tag--cool-gray" style="margin-left:auto">INFO</span>
-        </button>
-        <div class="cds--accordion__content">
-          <p class="finding-device">Affected: Router @ 192.168.20.1 · DNET 77 (unreachable) · 5 rejections</p>
-          <p>Five NPDU reject-message-to-network frames from router 192.168.20.1 give reason 0x02 (network unreachable) for DNET 77. No device ever answered on DNET 77, so the route appears decommissioned but still referenced by clients on 192.168.20.x.</p>
-          <p class="evidence-meta">Frames: 15210, 15288, 15991, 16402, 17005 · First seen 09:10:12 — last seen 09:13:55</p>
-          <p><strong>What to do:</strong> Find the client still routing to DNET 77 and remove the stale route.</p>
-          <ol class="remediation">
-            <li>Identify the device on 192.168.20.x sending to DNET 77 (check the frames listed).</li>
-            <li>Remove or repoint its DNET 77 route entry; confirm the rejections stop.</li>
-          </ol>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-</main>
+<script>
+  function toggleAccordion(heading) {
+    var item = heading.closest('.cds--accordion__item');
+    var active = item.classList.toggle('cds--accordion__item--active');
+    heading.setAttribute('aria-expanded', active);
+  }
+</script>
 </body>
 </html>
