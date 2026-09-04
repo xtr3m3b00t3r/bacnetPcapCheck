@@ -487,7 +487,7 @@ fn new_doc(fonts: &fonts::FontFamily<fonts::FontData>, title: &str) -> Document 
 }
 
 fn title_block(doc: &mut Document, subtitle: &str) {
-    doc.push(heading("BACnet Network Health Report", 22));
+    doc.push(heading("BACcheck — BACnet Network Health Report", 22));
     doc.push(body_gray(subtitle));
     doc.push(spacer());
 }
