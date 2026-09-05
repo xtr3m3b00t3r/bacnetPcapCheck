@@ -11,6 +11,5 @@ In early design; see the [wayfinder map](https://github.com/xtr3m3b00t3r/bacnetP
 BACcheck is released under the [MIT Licence](LICENSE) — use it, study it, change it,
 ship it in whatever you want, no strings. If it helps you, that's what it's for.
 
-
-
-**Benjamin D.W Truman** — [linkedin.com/in/benjamin-dw-truman](https://www.linkedin.com/in/benjamin-dw-truman/)
+This is a personal project, shared to demonstrate engineering craft; it is not a
+product or a business.
