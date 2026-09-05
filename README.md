@@ -8,9 +8,9 @@ In early design; see the [wayfinder map](https://github.com/xtr3m3b00t3r/bacnetP
 
 ## Licence
 
-BACcheck is free software: you can use, study, share, and modify it under the
-[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
+BACcheck is released under the [MIT Licence](LICENSE) — use it, study it, change it,
+ship it in whatever you want, no strings. If it helps you, that's what it's for.
 
-BACcheck is free software. Take it and build.
+
 
 **Benjamin D.W Truman** — [linkedin.com/in/benjamin-dw-truman](https://www.linkedin.com/in/benjamin-dw-truman/)
