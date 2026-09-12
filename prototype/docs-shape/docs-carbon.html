@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Answers part of wayfinder ticket #11:
+  "What does the Carbon-skinned, Diátaxis-structured docs site look like,
+  and does it read as one product with the HTML report (ticket #6)?"
+
+  Single static HTML file + Carbon's compiled CSS (@carbon/styles, CDN), same
+  approach as prototype/pdf-report-shape/report-carbon.html. This is NOT mdBook
+  — it's a mockup of an mdBook-shaped site (left nav = book parts/chapters,
+  main = rendered page) skinned with the same Carbon tokens as the report, so
+  the two can be judged side by side. The real site (ticket #12) builds on
+  mdBook proper; this only answers "does the look read as one product".
+
+  Open in a browser. Click sidebar entries to switch pages. Two Reference
+  entries are marked GENERATED to show what a docs-gen (xtask) fragment
+  pulled from IssueSpec / clap would look like inline with hand-written pages.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BACcheck Docs (prototype) — Carbon-skinned Diátaxis site</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@carbon/styles@1.114.0/css/styles.min.css">
+<style>
+  :root { --page-max: 72rem; }
+  body { background: var(--cds-background, #f4f4f4); color: var(--cds-text-primary, #161616); margin: 0; }
+
+  .doc-header { background: #161616; color: #f4f4f4; }
+  .doc-header__inner { max-width: var(--page-max); margin: 0 auto; padding: 0.875rem 1rem; display: flex; align-items: baseline; gap: 1rem; }
+  .doc-header__product { font-size: 0.875rem; font-weight: 600; letter-spacing: 0.16px; }
+  .doc-header__meta { margin-left: auto; font-size: 0.75rem; color: #c6c6c6; }
+
+  .doc-shell { max-width: var(--page-max); margin: 0 auto; display: grid; grid-template-columns: 16rem 1fr; min-height: calc(100vh - 48px); }
+
+  /* Left nav: Carbon side-nav look, grouped by Diátaxis quadrant */
+  nav.doc-nav { border-inline-end: 1px solid var(--cds-border-subtle, #e0e0e0); padding: 1rem 0; }
+  .doc-nav__group-label { font-size: var(--cds-label-01-font-size, 0.75rem); font-weight: 600; letter-spacing: 0.32px; text-transform: uppercase; color: var(--cds-text-secondary, #525252); padding: 1rem 1rem 0.375rem; }
+  .doc-nav__group-label:first-child { padding-top: 0; }
+  .doc-nav a.doc-nav__link { display: block; padding: 0.5rem 1rem; font-size: var(--cds-body-01-font-size, 0.875rem); color: var(--cds-text-primary, #161616); text-decoration: none; border-inline-start: 3px solid transparent; cursor: pointer; }
+  .doc-nav a.doc-nav__link:hover { background: var(--cds-layer-hover, #e8e8e8); }
+  .doc-nav a.doc-nav__link.active { border-inline-start-color: #0f62fe; background: var(--cds-layer-selected, #e0e0e0); font-weight: 600; }
+  .doc-nav a.doc-nav__link .doc-nav__tag { float: right; }
+
+  main.doc-main { padding: 2rem 3rem; max-width: 48rem; }
+  .doc-main h1 { font-size: var(--cds-heading-05-font-size, 2rem); font-weight: 400; margin: 0 0 0.25rem; }
+  .doc-main .doc-kicker { font-size: var(--cds-label-01-font-size, 0.75rem); font-weight: 600; letter-spacing: 0.32px; text-transform: uppercase; color: var(--cds-text-secondary, #525252); margin: 0 0 1rem; }
+  .doc-main p, .doc-main li { font-size: var(--cds-body-02-font-size, 0.875rem); line-height: 1.5; }
+  .doc-main h2 { font-size: var(--cds-heading-03-font-size, 1.25rem); font-weight: 400; margin: 2rem 0 0.75rem; }
+  ol.doc-steps li, ul.doc-list li { margin-bottom: 0.5rem; }
+
+  .doc-generated { position: relative; border: 1px dashed #8a3ffc; background: #f6f2ff; padding: 1rem 1rem 1rem 1rem; margin: 1rem 0; }
+  .doc-generated__label { display: inline-block; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.32px; text-transform: uppercase; color: #6929c4; margin-bottom: 0.5rem; }
+  .doc-generated code, .doc-generated pre { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.8125rem; }
+  .doc-generated table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  .doc-generated th, .doc-generated td { text-align: left; padding: 0.375rem 0.5rem; border-bottom: 1px solid #e8daff; font-size: 0.8125rem; }
+
+  .doc-page { display: none; }
+  .doc-page.active { display: block; }
+
+  .doc-footer { background: #161616; color: #c6c6c6; }
+  .doc-footer__inner { max-width: var(--page-max); margin: 0 auto; padding: 1rem; display: flex; align-items: baseline; gap: 0.75rem; }
+  .doc-footer__app { font-size: 0.875rem; font-weight: 600; color: #f4f4f4; }
+  .doc-footer__credit { margin-left: auto; font-size: 0.75rem; }
+  .doc-footer__credit a { color: #78a9ff; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header class="doc-header">
+  <div class="doc-header__inner">
+    <span class="doc-header__product">BACcheck Docs</span>
+    <span class="doc-header__meta">prototype — Carbon-skinned mdBook mockup, ticket #11</span>
+  </div>
+</header>
+
+<div class="doc-shell">
+  <nav class="doc-nav">
+    <div class="doc-nav__group-label">Tutorial</div>
+    <a class="doc-nav__link active" data-page="tutorial-first-report" onclick="showPage(this,'tutorial-first-report')">First capture to first report</a>
+
+    <div class="doc-nav__group-label">How-to guides</div>
+    <a class="doc-nav__link" data-page="howto-run" onclick="showPage(this,'howto-run')">Run a capture</a>
+    <a class="doc-nav__link" data-page="howto-read" onclick="showPage(this,'howto-read')">Read a finding</a>
+    <a class="doc-nav__link" data-page="howto-remediate" onclick="showPage(this,'howto-remediate')">Apply a remediation</a>
+    <a class="doc-nav__link" data-page="howto-severity" onclick="showPage(this,'howto-severity')">Interpret severity</a>
+
+    <div class="doc-nav__group-label">Reference</div>
+    <a class="doc-nav__link" data-page="ref-cli" onclick="showPage(this,'ref-cli')">CLI flags <span class="doc-nav__tag cds--tag cds--tag--sm cds--tag--purple">gen</span></a>
+    <a class="doc-nav__link" data-page="ref-issues" onclick="showPage(this,'ref-issues')">Issue catalogue <span class="doc-nav__tag cds--tag cds--tag--sm cds--tag--purple">gen</span></a>
+    <a class="doc-nav__link" data-page="ref-schema" onclick="showPage(this,'ref-schema')">Finding &amp; Report schema</a>
+    <a class="doc-nav__link" data-page="ref-severity" onclick="showPage(this,'ref-severity')">Severity levels</a>
+    <a class="doc-nav__link" data-page="ref-floors" onclick="showPage(this,'ref-floors')">Evidence-floor semantics</a>
+
+    <div class="doc-nav__group-label">Explanation</div>
+    <a class="doc-nav__link" data-page="exp-detectors" onclick="showPage(this,'exp-detectors')">How the detectors work</a>
+    <a class="doc-nav__link" data-page="exp-bacnet" onclick="showPage(this,'exp-bacnet')">BACnet/IP in brief</a>
+    <a class="doc-nav__link" data-page="exp-floors" onclick="showPage(this,'exp-floors')">Why evidence floors exist</a>
+  </nav>
+
+  <main class="doc-main">
+
+    <!-- ============ TUTORIAL (fully drafted, ASD-STE100) ============ -->
+    <article class="doc-page active" id="page-tutorial-first-report">
+      <p class="doc-kicker">Tutorial</p>
+      <h1>First capture to first report</h1>
+      <p>This tutorial shows you how to make your first BACcheck report. You need a BACnet/IP capture file. The file must end in <code>.pcap</code> or <code>.pcapng</code>.</p>
+
+      <h2>1. Install BACcheck</h2>
+      <p>Download the <code>baccheck</code> binary for your system. Put it on your PATH.</p>
+
+      <h2>2. Run BACcheck on your capture</h2>
+      <p>Open a terminal. Run this command:</p>
+      <pre><code>baccheck plant-floor-chiller-loop.pcapng</code></pre>
+      <p>BACcheck reads the file. It writes a report next to it, named <code>plant-floor-chiller-loop.baccheck.html</code>.</p>
+
+      <h2>3. Open the report</h2>
+      <p>Open the report file in a web browser. The top of the report states the number of findings and the worst severity. Read the summary first.</p>
+
+      <h2>4. Work the fix list</h2>
+      <ol class="doc-steps">
+        <li>Find the fix-list table below the summary.</li>
+        <li>Start at the top row. Rows are ordered by severity, most severe first.</li>
+        <li>Click a finding's name to open its full detail: affected devices, evidence, and steps to fix it.</li>
+        <li>Mark a row done when you finish it.</li>
+      </ol>
+      <p>You made your first report. See <a class="cds--link" onclick="showPage(document.querySelector('[data-page=howto-read]'),'howto-read')">Read a finding</a> for what each part of a finding means.</p>
+    </article>
+
+    <!-- ============ HOW-TO: run a capture ============ -->
+    <article class="doc-page" id="page-howto-run">
+      <p class="doc-kicker">How-to guide</p>
+      <h1>Run a capture</h1>
+      <p>Use this guide to record a BACnet/IP capture with a packet-capture tool, ready for BACcheck.</p>
+      <ol class="doc-steps">
+        <li>Connect your laptop to the BACnet/IP segment you want to check.</li>
+        <li>Start your capture tool. Filter on UDP port 47808.</li>
+        <li>Record for at least 5 minutes. Some BACcheck rules need this much time to raise a finding.</li>
+        <li>Stop the capture. Save it as <code>.pcap</code> or <code>.pcapng</code>.</li>
+      </ol>
+    </article>
+
+    <!-- ============ HOW-TO: read a finding ============ -->
+    <article class="doc-page" id="page-howto-read">
+      <p class="doc-kicker">How-to guide</p>
+      <h1>Read a finding</h1>
+      <p>Use this guide to read one finding in a BACcheck report.</p>
+      <ol class="doc-steps">
+        <li>Read the severity tag. It tells you how urgent the finding is. See <a class="cds--link" onclick="showPage(document.querySelector('[data-page=ref-severity]'),'ref-severity')">Severity levels</a>.</li>
+        <li>Read the "Affected" line. It names the device or devices involved.</li>
+        <li>Read the evidence text. It states what BACcheck saw in the capture.</li>
+        <li>Read the frame numbers. Open your capture tool and jump to these frames to see the raw packets.</li>
+        <li>Read "What to do". Follow the numbered steps in order.</li>
+      </ol>
+    </article>
+
+    <!-- ============ HOW-TO: apply a remediation ============ -->
+    <article class="doc-page" id="page-howto-remediate">
+      <p class="doc-kicker">How-to guide</p>
+      <h1>Apply a remediation</h1>
+      <p>Use this guide to fix a finding using its remediation steps.</p>
+      <ol class="doc-steps">
+        <li>Open the finding's "What to do" section.</li>
+        <li>Complete each numbered step in order. Do not skip a step.</li>
+        <li>Make one change at a time on the physical device or network.</li>
+        <li>Record a new capture after you finish all steps.</li>
+        <li>Run BACcheck again on the new capture. Confirm the finding no longer appears.</li>
+      </ol>
+    </article>
+
+    <!-- ============ HOW-TO: interpret severity ============ -->
+    <article class="doc-page" id="page-howto-severity">
+      <p class="doc-kicker">How-to guide</p>
+      <h1>Interpret severity</h1>
+      <p>Use this guide to decide which findings to fix first.</p>
+      <ol class="doc-steps">
+        <li>Fix every Critical finding first. These stop the network from working correctly right now.</li>
+        <li>Fix High findings next. These degrade the network under normal conditions.</li>
+        <li>Schedule Medium findings for your next planned visit.</li>
+        <li>Note Low findings. Fix them when you are already working on the same device.</li>
+      </ol>
+    </article>
+
+    <!-- ============ REFERENCE: CLI flags (GENERATED demo) ============ -->
+    <article class="doc-page" id="page-ref-cli">
+      <p class="doc-kicker">Reference</p>
+      <h1>CLI flags</h1>
+      <p>The full <code>baccheck</code> command-line contract, generated from the binary's own argument definitions (ticket #10) — never hand-duplicated.</p>
+      <div class="doc-generated">
+        <span class="doc-generated__label">Generated by cargo xtask docs-gen — do not hand-edit</span>
+        <pre><code>baccheck &lt;CAPTURE&gt; [OPTIONS]
+
+Arguments:
+  &lt;CAPTURE&gt;              Path to a .pcap or .pcapng capture file
+
+Options:
+  -o, --output &lt;PATH&gt;    Output HTML report path or directory
+  -s, --min-severity &lt;LEVEL&gt;
+                          critical | high | medium | low [default: low]
+  -v, --verbose          Print decode/parse diagnostics to stderr
+  -q, --quiet            Suppress the summary line
+  -h, --help
+  -V, --version</code></pre>
+      </div>
+    </article>
+
+    <!-- ============ REFERENCE: issue catalogue (GENERATED demo) ============ -->
+    <article class="doc-page" id="page-ref-issues">
+      <p class="doc-kicker">Reference</p>
+      <h1>Issue catalogue</h1>
+      <p>All 10 issue ids, their base severity, and their remediation template — generated directly from the library's <code>IssueSpec</code> table (ticket #3), so this page can never drift from what the report actually renders.</p>
+      <div class="doc-generated">
+        <span class="doc-generated__label">Generated by cargo xtask docs-gen — do not hand-edit</span>
+        <table>
+          <tr><th>Issue id</th><th>Base severity</th><th>Remediation template (excerpt)</th></tr>
+          <tr><td><code>duplicate-device-id</code></td><td>High</td><td>Renumber one of the two devices claiming instance {n}…</td></tr>
+          <tr><td><code>broadcast-storm</code></td><td>High</td><td>Increase the Who-Is retry/back-off interval on {devices}…</td></tr>
+          <tr><td><code>unresponsive-device</code></td><td>Medium</td><td>Confirm device {ip} is on the network…</td></tr>
+          <tr><td><code>…</code></td><td>…</td><td>(7 more rows)</td></tr>
+        </table>
+      </div>
+    </article>
+
+    <!-- ============ REFERENCE: Finding/Report schema (hand-written) ============ -->
+    <article class="doc-page" id="page-ref-schema">
+      <p class="doc-kicker">Reference</p>
+      <h1>Finding &amp; Report schema</h1>
+      <p>A finding has one issue id, one severity, one or more affected devices, an occurrence count, evidence text, up to 5 example frame numbers, and first/last-seen timestamps.</p>
+      <p>A report is a flat, ordered list of findings. The order is: severity, then issue, then device. A report also has summary stats and, when more than half the capture is undecodable, a capture-health warning.</p>
+    </article>
+
+    <!-- ============ REFERENCE: severity levels (hand-written) ============ -->
+    <article class="doc-page" id="page-ref-severity">
+      <p class="doc-kicker">Reference</p>
+      <h1>Severity levels</h1>
+      <p>BACcheck uses four severity levels: Critical, High, Medium, Low. A rule may raise a finding's severity above its base level when the evidence is more extreme. A rule never lowers a finding's severity below its base level.</p>
+    </article>
+
+    <!-- ============ REFERENCE: evidence-floor semantics (hand-written) ============ -->
+    <article class="doc-page" id="page-ref-floors">
+      <p class="doc-kicker">Reference</p>
+      <h1>Evidence-floor semantics</h1>
+      <p>Each detection rule has a minimum amount of evidence it needs before it may raise a finding. This is the rule's evidence floor. Below the floor, the rule stays silent. Rate-based rules also need a minimum capture length of 5 minutes.</p>
+    </article>
+
+    <!-- ============ EXPLANATION pages (hand-written) ============ -->
+    <article class="doc-page" id="page-exp-detectors">
+      <p class="doc-kicker">Explanation</p>
+      <h1>How the detectors work</h1>
+      <p>Each of the 10 detectors is an independent function. It reads the full stream of decoded BACnet records once, in order, and produces zero or more findings. A detector keeps its own local state as it reads — for example, a table of which device instances have answered which Who-Is. Detectors do not share state or a common pre-pass; this keeps each one simple to test on its own against a fixture capture.</p>
+    </article>
+
+    <article class="doc-page" id="page-exp-bacnet">
+      <p class="doc-kicker">Explanation</p>
+      <h1>BACnet/IP in brief</h1>
+      <p>BACnet is a protocol for building-automation devices — things like chillers, air handlers, and lighting controllers — to talk to each other. BACnet/IP is the variant that runs over ordinary IP networks, using UDP port 47808. Devices announce themselves with a Who-Is/I-Am handshake, and read or write each other's properties with services like ReadProperty. BACcheck only looks at BACnet/IP traffic; it does not look at MS/TP or other BACnet link layers.</p>
+    </article>
+
+    <article class="doc-page" id="page-exp-floors">
+      <p class="doc-kicker">Explanation</p>
+      <h1>Why evidence floors exist</h1>
+      <p>A short, quiet capture can look identical to a healthy network and to a network with an intermittent problem — there just isn't enough evidence yet to tell the two apart. Evidence floors stop BACcheck from guessing in that gap: a rule stays silent rather than raising a finding it can't actually support. This keeps every finding in a report backed by enough evidence to act on, at the cost of occasionally under-reporting a real but rarely-triggered problem in a short capture.</p>
+    </article>
+
+  </main>
+</div>
+
+<footer class="doc-footer">
+  <div class="doc-footer__inner">
+    <span class="doc-footer__app">BACcheck Docs</span>
+    <span class="doc-footer__credit">MIT-licensed · Designed by <a href="https://www.linkedin.com/in/benjamin-dw-truman/" target="_blank" rel="noopener">Benjamin D.W Truman</a></span>
+  </div>
+</footer>
+
+<script>
+  function showPage(link, id) {
+    document.querySelectorAll('.doc-nav__link').forEach(function (a) { a.classList.remove('active'); });
+    link.classList.add('active');
+    document.querySelectorAll('.doc-page').forEach(function (p) { p.classList.remove('active'); });
+    document.getElementById('page-' + id).classList.add('active');
+    window.scrollTo(0, 0);
+  }
+</script>
+</body>
+</html>
