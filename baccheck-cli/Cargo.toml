@@ -1,0 +1,14 @@
+[package]
+name = "baccheck-cli"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[[bin]]
+name = "baccheck"
+path = "src/main.rs"
+
+[dependencies]
+baccheck-core = { path = "../baccheck-core" }
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,12 @@
+[package]
+name = "baccheck-core"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[dependencies]
+pcap-file = "2.0.0"
+
+[dev-dependencies]
+tempfile = "3"
