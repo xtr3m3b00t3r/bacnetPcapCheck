@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use bacnet_rs::app::{Apdu, MaxApduSize, MaxSegments};
 use bacnet_rs::datalink::bip::{BvlcFunction, BvlcHeader};
+use bacnet_rs::network::{NetworkLayerMessage, NetworkMessageType, Npdu, NpduControl};
 use bacnet_rs::object::{ObjectIdentifier, ObjectType, Segmentation};
 use bacnet_rs::service::{
     ConfirmedServiceChoice, IAmRequest, UnconfirmedServiceChoice, WhoIsRequest,
@@ -161,6 +162,45 @@ fn decodes_another_confirmed_service_to_header_level_only() {
                 invoke_id: 9,
                 service_choice: ConfirmedServiceChoice::ReadProperty as u8,
             },
+        }
+    );
+}
+
+#[test]
+fn decodes_a_network_layer_message_to_its_message_type() {
+    let src = addr("10.0.0.5:47808");
+    let dst = addr("10.0.0.255:47808");
+
+    let npdu = Npdu {
+        version: 1,
+        control: NpduControl {
+            network_message: true,
+            ..NpduControl::default()
+        },
+        destination: None,
+        source: None,
+        hop_count: None,
+    };
+    let message = NetworkLayerMessage::new(NetworkMessageType::WhoIsRouterToNetwork, None);
+
+    let mut npdu_and_message = npdu.encode();
+    npdu_and_message.extend_from_slice(&message.encode());
+
+    let payload = bvlc_frame(BvlcFunction::OriginalBroadcastNpdu, &npdu_and_message);
+    let packet = raw_packet(10, src, dst, payload);
+
+    let record = decode_packet(&packet).expect("decodes as BACnet traffic");
+
+    assert_eq!(
+        record,
+        DecodeRecord::NetworkMessage {
+            envelope: Envelope {
+                frame_no: 10,
+                timestamp: packet.timestamp,
+                src,
+                dst,
+            },
+            message_type: NetworkMessageType::WhoIsRouterToNetwork as u8,
         }
     );
 }
