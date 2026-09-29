@@ -1,18 +1,16 @@
 //! Thin CLI wiring around `baccheck-core`. See wayfinder ticket #10 for the decided surface.
 //!
-//! Only the parts with something behind them are wired up here: argument parsing and exit codes
-//! `0` (no findings — currently just "read the capture without error"), `2` (usage error, handled
-//! by clap itself), and `3` (input error). `--output` and `--min-severity` are accepted and
-//! validated but have no effect yet, and exit codes `1` (findings present) and `4` (decode
-//! failure) are unreachable, because the decoding, detection, and report-generation seams
-//! (wayfinder tickets #7, #4, #6) don't exist yet.
+//! Exit codes: `0` no findings, `1` findings present (any severity, whatever `--min-severity`
+//! says), `2` usage error (clap), `3` input error, `4` internal failure (also: report not written).
+//! Still inert: the first-run notice, and `--verbose` beyond the frame counts.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 
-use baccheck_core::pcap::read_capture;
+use baccheck_core::analyse_capture;
+use baccheck_core::report::{render_html, Severity as CoreSeverity};
 
 /// Analyse a BACnet/IP capture for common network problems.
 #[derive(Parser)]
@@ -46,31 +44,73 @@ enum Severity {
     Low,
 }
 
+impl From<Severity> for CoreSeverity {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Critical => CoreSeverity::Critical,
+            Severity::High => CoreSeverity::High,
+            Severity::Medium => CoreSeverity::Medium,
+            Severity::Low => CoreSeverity::Low,
+        }
+    }
+}
+
+/// `<capture-stem>.baccheck.html`, next to the capture unless `--output` says otherwise.
+fn report_path(capture: &Path, output: Option<&Path>) -> PathBuf {
+    let file_name = format!(
+        "{}.baccheck.html",
+        capture
+            .file_stem()
+            .unwrap_or(capture.as_os_str())
+            .to_string_lossy()
+    );
+    match output {
+        Some(dir) if dir.is_dir() => dir.join(file_name),
+        Some(file) => file.to_path_buf(),
+        None => capture.with_file_name(file_name),
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let _not_yet_wired = (&cli.output, cli.min_severity, cli.verbose);
 
-    let packets = match read_capture(&cli.capture) {
-        Ok(packets) => packets,
+    let report = match analyse_capture(&cli.capture) {
+        Ok(report) => report,
         Err(e) => {
             eprintln!("Error. Baccheck cannot read the capture. {e}");
             return ExitCode::from(3);
         }
     };
 
-    let mut frame_count: u64 = 0;
-    for packet in packets {
-        match packet {
-            Ok(_) => frame_count += 1,
-            Err(e) => {
-                eprintln!("Error. Baccheck cannot read the capture. {e}");
-                return ExitCode::from(3);
-            }
-        }
+    let path = report_path(&cli.capture, cli.output.as_deref());
+    let html = render_html(&report, cli.min_severity.map(CoreSeverity::from));
+    if let Err(e) = std::fs::write(&path, html) {
+        eprintln!(
+            "Error. Baccheck cannot write the report to {}. {e}",
+            path.display()
+        );
+        return ExitCode::from(4);
     }
 
-    if !cli.quiet {
-        println!("{frame_count} frame(s) read from {}", cli.capture.display());
+    let stats = &report.stats;
+    if cli.verbose {
+        println!(
+            "{} frame(s) read. {} decoded. {} undecoded. {} not BACnet.",
+            stats.total_frames,
+            stats.decoded_frames,
+            stats.undecoded_frames,
+            stats.non_bacnet_frames
+        );
     }
-    ExitCode::from(0)
+    if report.capture_health_warning && !cli.quiet {
+        eprintln!("Warning. More than half of the capture is not decodable BACnet. Read the report with care.");
+    }
+    let count = report.findings.len();
+    println!(
+        "Baccheck found {count} {}. The report is at {}.",
+        if count == 1 { "finding" } else { "findings" },
+        path.display()
+    );
+
+    ExitCode::from(if count == 0 { 0 } else { 1 })
 }
