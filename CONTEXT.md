@@ -11,14 +11,14 @@ A glossary of the domain terms for the BACnet Pcap Health Check project. Impleme
 - **Finding** — A detected problem: one issue instance on the network, with severity, affected device(s), evidence, and remediation steps. The unit of output from detection.
 - **Issue** — A category of network problem the tool is built to detect (e.g. duplicate device ID, broadcast storm). Currently scoped to a chosen top 10.
 - **Remediation** — The prescriptive "steps to improve" text a finding carries, aimed at a field engineer.
-- **Report** — The aggregated set of findings, shaped for output as a PDF.
+- **Report** — The aggregated set of findings, rendered as one self-contained HTML file that the user prints to PDF from a browser.
 
 ## Seams (the analysis pipeline)
 
 - **Pcap parsing** — Turning capture bytes into a stream of packets. Input is pcap/pcapng; output is packets.
 - **BACnet decoding** — Turning BACnet/IP packets into typed, decoded protocol records. Input is packets; output is decoded records.
 - **Issue detection** — Turning decoded records into findings. Input is decoded records; output is findings.
-- **PDF generation** — Turning findings into the delivered PDF. Input is the report; output is bytes/PDF.
+- **Report rendering** — Turning the report into the delivered HTML file. Input is the report; output is HTML.
 
 These are the four testable seams of the system.
 
