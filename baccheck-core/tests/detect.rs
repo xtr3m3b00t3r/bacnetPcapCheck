@@ -4,7 +4,7 @@ mod common;
 
 use common::*;
 
-use baccheck_core::detect::{broadcast_storm, duplicate_device_id};
+use baccheck_core::detect::{broadcast_storm, duplicate_device_id, unresponsive_device};
 use baccheck_core::report::{IssueId, Severity};
 
 #[test]
@@ -347,4 +347,102 @@ fn peak_window_is_reported_relative_to_the_capture_start() {
         .evidence
         .summary
         .contains("from 120 s into the capture"));
+}
+
+#[test]
+fn device_answering_under_half_its_requests_is_a_medium_finding() {
+    let records = requests_to_device(10, 4);
+
+    let findings = unresponsive_device(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::UnresponsiveDevice);
+    assert_eq!(f.severity, Severity::Medium);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip.to_string(), "10.0.0.9");
+    assert_eq!(f.occurrences, 6);
+    assert_eq!(f.evidence.frames, vec![5, 6, 7, 8, 9]);
+    assert!(f.evidence.summary.contains("one point"));
+}
+
+#[test]
+fn device_answering_under_a_fifth_is_high() {
+    let findings = unresponsive_device(&requests_to_device(10, 1));
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::High);
+}
+
+#[test]
+fn unresponsive_stays_silent_below_the_request_floor() {
+    assert!(unresponsive_device(&requests_to_device(9, 0)).is_empty());
+}
+
+#[test]
+fn unresponsive_stays_silent_when_half_or_more_are_answered() {
+    assert!(unresponsive_device(&requests_to_device(10, 5)).is_empty());
+}
+
+#[test]
+fn reject_and_error_style_replies_count_as_answers() {
+    let mut records = requests_to_device(10, 0);
+    records.push(reject(2000, 1, "10.0.0.9:47808", "10.0.0.5:47808", 1));
+    records.push(reject(2001, 3, "10.0.0.9:47808", "10.0.0.5:47808", 2));
+    records.push(reject(2002, 5, "10.0.0.9:47808", "10.0.0.5:47808", 3));
+    records.push(reject(2003, 7, "10.0.0.9:47808", "10.0.0.5:47808", 4));
+    records.push(reject(2004, 9, "10.0.0.9:47808", "10.0.0.5:47808", 5));
+
+    assert!(unresponsive_device(&records).is_empty());
+}
+
+#[test]
+fn a_reply_after_the_response_window_does_not_count() {
+    let mut records = requests_to_device(10, 0);
+    for n in 0..10u8 {
+        records.push(simple_ack(
+            3000 + u64::from(n),
+            u64::from(n) * 2 + 11,
+            "10.0.0.9:47808",
+            "10.0.0.5:47808",
+            n + 1,
+        ));
+    }
+
+    let findings = unresponsive_device(&records);
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::High);
+}
+
+#[test]
+fn retransmissions_of_one_unanswered_request_count_once() {
+    let mut records = requests_to_device(10, 10);
+    // One extra request, sent three times, never answered: 11 requests, 10 answered.
+    for (n, secs) in [20u64, 23, 26].into_iter().enumerate() {
+        records.push(confirmed_request(
+            4000 + n as u64,
+            secs,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            99,
+        ));
+    }
+
+    assert!(unresponsive_device(&records).is_empty());
+}
+
+#[test]
+fn a_reused_invoke_id_is_a_new_request() {
+    let mut records = requests_to_device(10, 10);
+    records.push(confirmed_request(
+        5000,
+        100,
+        "10.0.0.5:47808",
+        "10.0.0.9:47808",
+        1,
+    ));
+
+    // 11 requests, the late one unanswered: 10/11 answered, silent.
+    assert!(unresponsive_device(&records).is_empty());
 }

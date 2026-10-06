@@ -1,6 +1,6 @@
 //! Seam 3: the ten pure-function detectors (`stream -> Vec<Finding>`) over the decode seam's output.
 //!
-//! Implemented so far: [`duplicate_device_id`] and [`broadcast_storm`]. The other nine are separate tickets; see wayfinder
+//! Implemented so far: [`duplicate_device_id`], [`broadcast_storm`] and [`unresponsive_device`]. The others are separate tickets; see wayfinder
 //! ticket #4 for the decided rules. [`detect_all`] runs every detector that exists.
 //!
 //! Contract for `duplicate_device_id` (one test per line, in `tests/detect.rs`):
@@ -9,6 +9,13 @@
 //! - Three or more distinct source IPs make it Critical.
 //! - Device instance 4194303 is the wildcard and never counts.
 //! - One address sending many I-Ams for one instance is not a duplicate.
+//!
+//! Contract for `unresponsive_device` (one test per line, in `tests/detect.rs`):
+//! - A confirmed request is answered by an ack, error, reject or abort with the same invoke ID and
+//!   reversed addresses, within 10 s of the request's last transmission.
+//! - Retransmissions of an unanswered request count once; a reused invoke ID after an answer is a new request.
+//! - Judged per responder: silent below 10 requests received; Medium under 50% answered, High under 20%.
+//! - Evidence lists at most five unanswered request frames and states the single-vantage caveat.
 //!
 //! Contract for `broadcast_storm` (one test per line, in `tests/detect.rs`):
 //! - Stays silent below the evidence floor: capture span under 5 minutes, or (for the saturation
@@ -27,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use crate::decode::DecodeRecord;
+use crate::decode::{ApduHeader, DecodeRecord};
 use crate::report::{
     CaptureStats, DeviceRef, Evidence, Finding, IssueId, Severity, MAX_EVIDENCE_FRAMES,
 };
@@ -40,6 +47,7 @@ pub const WILDCARD_DEVICE_INSTANCE: u32 = 4_194_303;
 pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding> {
     let mut findings = duplicate_device_id(records);
     findings.extend(broadcast_storm(records, stats));
+    findings.extend(unresponsive_device(records));
     findings
 }
 
@@ -324,4 +332,139 @@ pub fn broadcast_storm(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fi
         first_seen: broadcasts.iter().map(|(t, _)| *t).min().unwrap_or_default(),
         last_seen: broadcasts.iter().map(|(t, _)| *t).max().unwrap_or_default(),
     }]
+}
+
+/// One confirmed request, after folding retransmissions together.
+struct Request {
+    responder: SocketAddr,
+    first_frame: u64,
+    first: Duration,
+    last_sent: Duration,
+    answered: bool,
+}
+
+fn confirmed_key(
+    envelope: &crate::decode::Envelope,
+    invoke_id: u8,
+) -> (SocketAddr, SocketAddr, u8) {
+    (envelope.src, envelope.dst, invoke_id)
+}
+
+/// Correlates confirmed requests with their responses by (requester, responder, invoke ID).
+/// Silence is attributed to the responder.
+pub fn unresponsive_device(records: &[DecodeRecord]) -> Vec<Finding> {
+    let mut requests: Vec<Request> = Vec::new();
+    // Index into `requests` of the request still waiting for an answer, per key.
+    let mut open: BTreeMap<(SocketAddr, SocketAddr, u8), usize> = BTreeMap::new();
+    let mut instances: BTreeMap<SocketAddr, u32> = BTreeMap::new();
+
+    for record in records {
+        match record {
+            DecodeRecord::IAm {
+                envelope,
+                device_instance,
+                ..
+            } => {
+                instances.insert(envelope.src, *device_instance);
+            }
+            DecodeRecord::Apdu { envelope, header } => match header {
+                ApduHeader::ConfirmedRequest { invoke_id, .. } => {
+                    let key = confirmed_key(envelope, *invoke_id);
+                    match open.get(&key) {
+                        Some(&index) => requests[index].last_sent = envelope.timestamp,
+                        None => {
+                            open.insert(key, requests.len());
+                            requests.push(Request {
+                                responder: envelope.dst,
+                                first_frame: envelope.frame_no,
+                                first: envelope.timestamp,
+                                last_sent: envelope.timestamp,
+                                answered: false,
+                            });
+                        }
+                    }
+                }
+                ApduHeader::SimpleAck { invoke_id, .. }
+                | ApduHeader::ComplexAck { invoke_id, .. }
+                | ApduHeader::Error { invoke_id, .. }
+                | ApduHeader::Reject { invoke_id }
+                | ApduHeader::Abort { invoke_id, .. } => {
+                    // Reversed addresses: the response's src is the request's dst.
+                    let key = (envelope.dst, envelope.src, *invoke_id);
+                    if let Some(index) = open.remove(&key) {
+                        let request = &mut requests[index];
+                        request.answered =
+                            envelope.timestamp.saturating_sub(request.last_sent) <= RESPONSE_WINDOW;
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    let mut by_responder: BTreeMap<SocketAddr, Vec<&Request>> = BTreeMap::new();
+    for request in &requests {
+        by_responder
+            .entry(request.responder)
+            .or_default()
+            .push(request);
+    }
+
+    by_responder
+        .into_iter()
+        .filter_map(|(responder, received)| {
+            unresponsive_finding(responder, instances.get(&responder).copied(), &received)
+        })
+        .collect()
+}
+
+fn unresponsive_finding(
+    responder: SocketAddr,
+    device_instance: Option<u32>,
+    received: &[&Request],
+) -> Option<Finding> {
+    let total = received.len() as u64;
+    if total < UNRESPONSIVE_MIN_REQUESTS {
+        return None;
+    }
+    let unanswered: Vec<&&Request> = received.iter().filter(|r| !r.answered).collect();
+    let answered_share = (total - unanswered.len() as u64) as f64 / total as f64;
+    let severity = if answered_share < UNRESPONSIVE_HIGH_BELOW {
+        Severity::High
+    } else if answered_share < UNRESPONSIVE_MEDIUM_BELOW {
+        IssueId::UnresponsiveDevice.spec().base_severity
+    } else {
+        return None;
+    };
+
+    let mut frames: Vec<u64> = unanswered.iter().map(|r| r.first_frame).collect();
+    frames.sort_unstable();
+    frames.truncate(MAX_EVIDENCE_FRAMES);
+
+    let summary = format!(
+        "{responder} answered {:.0}% of the {total} confirmed requests sent to it ({} unanswered within {} s). \
+         This is seen from one point in the network: a response that took another path would look like silence.",
+        answered_share * 100.0,
+        unanswered.len(),
+        RESPONSE_WINDOW.as_secs()
+    );
+
+    Some(Finding {
+        issue: IssueId::UnresponsiveDevice,
+        severity,
+        affected: vec![DeviceRef {
+            device_instance,
+            ip: responder.ip(),
+            port: Some(responder.port()),
+        }],
+        occurrences: unanswered.len() as u64,
+        evidence: Evidence { summary, frames },
+        first_seen: unanswered.iter().map(|r| r.first).min().unwrap_or_default(),
+        last_seen: unanswered
+            .iter()
+            .map(|r| r.last_sent)
+            .max()
+            .unwrap_or_default(),
+    })
 }

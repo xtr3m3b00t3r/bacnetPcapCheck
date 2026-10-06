@@ -4,7 +4,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use baccheck_core::decode::{DecodeRecord, Envelope};
+use baccheck_core::decode::{ApduHeader, DecodeRecord, Envelope};
 use baccheck_core::report::CaptureStats;
 use bacnet_rs::object::Segmentation;
 
@@ -87,4 +87,81 @@ pub fn background(count: u64, span_secs: u64) -> Vec<DecodeRecord> {
 
 pub fn decoded_stats(span_secs: u64, records: &[DecodeRecord]) -> CaptureStats {
     stats(span_secs, records.len() as u64, 0, 0)
+}
+
+fn apdu(frame_no: u64, secs: u64, src: &str, dst: &str, header: ApduHeader) -> DecodeRecord {
+    DecodeRecord::Apdu {
+        envelope: Envelope {
+            frame_no,
+            timestamp: Duration::from_secs(secs),
+            src: addr(src),
+            dst: addr(dst),
+        },
+        header,
+    }
+}
+
+pub fn confirmed_request(
+    frame_no: u64,
+    secs: u64,
+    src: &str,
+    dst: &str,
+    invoke_id: u8,
+) -> DecodeRecord {
+    apdu(
+        frame_no,
+        secs,
+        src,
+        dst,
+        ApduHeader::ConfirmedRequest {
+            segmented: false,
+            more_follows: false,
+            segmented_response_accepted: false,
+            invoke_id,
+            service_choice: 12,
+        },
+    )
+}
+
+pub fn simple_ack(frame_no: u64, secs: u64, src: &str, dst: &str, invoke_id: u8) -> DecodeRecord {
+    apdu(
+        frame_no,
+        secs,
+        src,
+        dst,
+        ApduHeader::SimpleAck {
+            invoke_id,
+            service_choice: 15,
+        },
+    )
+}
+
+pub fn reject(frame_no: u64, secs: u64, src: &str, dst: &str, invoke_id: u8) -> DecodeRecord {
+    apdu(frame_no, secs, src, dst, ApduHeader::Reject { invoke_id })
+}
+
+/// `total` confirmed requests from 10.0.0.5 to 10.0.0.9, invoke IDs 1.., 2 s apart from t=0,
+/// frames 1..; the first `answered` get a simple ack from the responder 1 s later (frames 1000..).
+pub fn requests_to_device(total: u8, answered: u8) -> Vec<DecodeRecord> {
+    let mut records = Vec::new();
+    for n in 0..total {
+        let secs = u64::from(n) * 2;
+        records.push(confirmed_request(
+            u64::from(n) + 1,
+            secs,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            n + 1,
+        ));
+        if n < answered {
+            records.push(simple_ack(
+                1000 + u64::from(n),
+                secs + 1,
+                "10.0.0.9:47808",
+                "10.0.0.5:47808",
+                n + 1,
+            ));
+        }
+    }
+    records
 }

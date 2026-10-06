@@ -37,3 +37,15 @@ pub const STORM_UNDECODABLE_NOTE_SHARE: f64 = 0.25;
 
 /// Top talkers a storm finding names.
 pub const STORM_TOP_TALKERS: usize = 5;
+
+/// Time a responder has to answer a confirmed request, measured from the request's last transmission.
+pub const RESPONSE_WINDOW: Duration = Duration::from_secs(10);
+
+/// Confirmed requests a device must have received before its silence is judged.
+pub const UNRESPONSIVE_MIN_REQUESTS: u64 = 10;
+
+/// Answered share of received requests below which a device is Medium.
+pub const UNRESPONSIVE_MEDIUM_BELOW: f64 = 0.50;
+
+/// Answered share of received requests below which a device is High.
+pub const UNRESPONSIVE_HIGH_BELOW: f64 = 0.20;
