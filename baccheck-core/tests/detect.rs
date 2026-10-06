@@ -4,6 +4,7 @@ mod common;
 
 use common::*;
 
+use baccheck_core::decode::DecodeRecord;
 use baccheck_core::detect::{
     broadcast_storm, duplicate_bbmd, duplicate_device_id, incomplete_bdt, unresponsive_device,
 };
@@ -729,7 +730,7 @@ fn incomplete_bdt_never_escalates_however_much_evidence_there_is() {
 }
 
 #[test]
-fn incomplete_bdt_ignores_a_forwarder_that_is_itself_a_local_host() {
+fn incomplete_bdt_does_not_count_broadcasts_from_a_host_that_also_forwards() {
     let mut records = local_broadcasts(50);
     records.push(forwarded_from(
         51,
@@ -738,6 +739,18 @@ fn incomplete_bdt_ignores_a_forwarder_that_is_itself_a_local_host() {
         "10.0.9.9:47808",
         1,
     ));
+
+    assert!(incomplete_bdt(&records).is_empty());
+}
+
+#[test]
+fn incomplete_bdt_ignores_a_unicast_forwarded_npdu() {
+    let mut records = local_broadcasts(50);
+    let mut unicast = forwarded_from(51, 60, "10.0.5.1:47808", "10.0.9.9:47808", 1);
+    if let DecodeRecord::ForwardedNpdu { envelope, .. } = &mut unicast {
+        envelope.dst = addr("10.0.0.7:47808");
+    }
+    records.push(unicast);
 
     assert!(incomplete_bdt(&records).is_empty());
 }

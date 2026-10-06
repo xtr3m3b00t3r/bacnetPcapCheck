@@ -43,7 +43,8 @@
 //! - A peer BBMD relaying broadcasts into the segment, while no Forwarded-NPDU carries a local
 //!   host as its original source, is a Low finding naming the peer BBMD(s). It never escalates.
 //! - Stays silent below 50 local broadcasts. There is no span floor: it is not a rate rule.
-//! - A forwarder that is itself a local host is not a peer.
+//! - A host that forwards is never local: its own broadcasts do not count towards the floor.
+//! - Only a Forwarded-NPDU sent to broadcast context counts as relaying into the segment.
 //! - Evidence carries at most five frames and states that this is a single-vantage inference.
 
 pub mod thresholds;
@@ -653,14 +654,23 @@ pub fn incomplete_bdt(records: &[DecodeRecord]) -> Vec<Finding> {
         IpAddr::V6(_) => false,
     };
 
-    // Local hosts: IPs that sent a broadcast themselves, not a relayed one.
+    // Local hosts: IPs that sent a broadcast themselves and never forwarded one.
+    let forwarders: BTreeSet<IpAddr> = records
+        .iter()
+        .filter_map(|r| match r {
+            DecodeRecord::ForwardedNpdu { envelope, .. } => Some(envelope.src.ip()),
+            _ => None,
+        })
+        .collect();
     let mut local_hosts: BTreeSet<IpAddr> = BTreeSet::new();
     let mut local_broadcasts: u64 = 0;
     for record in records {
         if matches!(record, DecodeRecord::ForwardedNpdu { .. }) {
             continue;
         }
-        if let Some(envelope) = envelope_of(record).filter(|e| is_broadcast(&e.dst)) {
+        if let Some(envelope) = envelope_of(record)
+            .filter(|e| is_broadcast(&e.dst) && !forwarders.contains(&e.src.ip()))
+        {
             local_hosts.insert(envelope.src.ip());
             local_broadcasts += 1;
         }
@@ -679,7 +689,7 @@ pub fn incomplete_bdt(records: &[DecodeRecord]) -> Vec<Finding> {
         if local_hosts.contains(&original_source.ip()) {
             return Vec::new();
         }
-        if !local_hosts.contains(&envelope.src.ip()) {
+        if is_broadcast(&envelope.dst) {
             inbound.push(envelope);
         }
     }
