@@ -66,3 +66,7 @@ pub const FORWARD_LOOP_PER_BUCKET: u64 = 5;
 
 /// Sightings of one forwarded broadcast, in one bucket, above which a forwarding loop is Critical.
 pub const FORWARD_LOOP_CRITICAL_PER_BUCKET: u64 = 20;
+
+/// Broadcasts sent by local hosts that must be seen before their never being relayed back is
+/// read as a missing BDT entry. A message-count floor only: the rule is not a rate rule.
+pub const INCOMPLETE_BDT_MIN_LOCAL_BROADCASTS: u64 = 50;

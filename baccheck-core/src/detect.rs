@@ -36,6 +36,15 @@
 //! - The duplicate-forwarder trigger has no span floor: it needs no rate, only two sightings.
 //! - One finding covers every offending broadcast: severity is the worst of them, affected devices
 //!   are the forwarding BBMDs involved, and evidence carries at most five frames.
+//!
+//! Contract for `incomplete_bdt` (one test per line, in `tests/detect.rs`):
+//! - Local hosts are the source IPs that sent a broadcast themselves, not a relayed one. No subnet
+//!   mask is assumed for the local/remote split.
+//! - A peer BBMD relaying broadcasts into the segment, while no Forwarded-NPDU carries a local
+//!   host as its original source, is a Low finding naming the peer BBMD(s). It never escalates.
+//! - Stays silent below 50 local broadcasts. There is no span floor: it is not a rate rule.
+//! - A forwarder that is itself a local host is not a peer.
+//! - Evidence carries at most five frames and states that this is a single-vantage inference.
 
 pub mod thresholds;
 
@@ -58,6 +67,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(broadcast_storm(records, stats));
     findings.extend(unresponsive_device(records));
     findings.extend(duplicate_bbmd(records, stats));
+    findings.extend(incomplete_bdt(records));
     findings
 }
 
@@ -629,6 +639,91 @@ pub fn duplicate_bbmd(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fin
         last_seen: sightings
             .iter()
             .map(|s| s.timestamp)
+            .max()
+            .unwrap_or_default(),
+    }]
+}
+
+/// Spots a peer BBMD relaying broadcasts into the capture's segment while no broadcast from the
+/// segment's own hosts is ever relayed back: a single-vantage proxy for a BDT missing this segment.
+pub fn incomplete_bdt(records: &[DecodeRecord]) -> Vec<Finding> {
+    let broadcasts = broadcast_destinations(records);
+    let is_broadcast = |dst: &SocketAddr| match dst.ip() {
+        IpAddr::V4(ip) => ip == Ipv4Addr::BROADCAST || broadcasts.contains(&ip),
+        IpAddr::V6(_) => false,
+    };
+
+    // Local hosts: IPs that sent a broadcast themselves, not a relayed one.
+    let mut local_hosts: BTreeSet<IpAddr> = BTreeSet::new();
+    let mut local_broadcasts: u64 = 0;
+    for record in records {
+        if matches!(record, DecodeRecord::ForwardedNpdu { .. }) {
+            continue;
+        }
+        if let Some(envelope) = envelope_of(record).filter(|e| is_broadcast(&e.dst)) {
+            local_hosts.insert(envelope.src.ip());
+            local_broadcasts += 1;
+        }
+    }
+
+    let mut inbound: Vec<&crate::decode::Envelope> = Vec::new();
+    for record in records {
+        let DecodeRecord::ForwardedNpdu {
+            envelope,
+            original_source,
+            ..
+        } = record
+        else {
+            continue;
+        };
+        if local_hosts.contains(&original_source.ip()) {
+            return Vec::new();
+        }
+        if !local_hosts.contains(&envelope.src.ip()) {
+            inbound.push(envelope);
+        }
+    }
+    if local_broadcasts < INCOMPLETE_BDT_MIN_LOCAL_BROADCASTS || inbound.is_empty() {
+        return Vec::new();
+    }
+
+    let peers: BTreeSet<SocketAddr> = inbound.iter().map(|e| e.src).collect();
+    let mut frames: Vec<u64> = inbound.iter().map(|e| e.frame_no).collect();
+    frames.sort_unstable();
+    frames.truncate(MAX_EVIDENCE_FRAMES);
+    let peer_text = peers
+        .iter()
+        .map(SocketAddr::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let summary = format!(
+        "{peer_text} relayed {} broadcast(s) into this segment, but none of the {local_broadcasts} \
+         broadcasts sent by local hosts was relayed back. This is a single-vantage inference, not a \
+         read of the BDT: the peer may be missing this segment's BBMD.",
+        inbound.len()
+    );
+
+    vec![Finding {
+        issue: IssueId::IncompleteBdt,
+        severity: IssueId::IncompleteBdt.spec().base_severity,
+        affected: peers
+            .iter()
+            .map(|addr| DeviceRef {
+                device_instance: None,
+                ip: addr.ip(),
+                port: Some(addr.port()),
+            })
+            .collect(),
+        occurrences: inbound.len() as u64,
+        evidence: Evidence { summary, frames },
+        first_seen: inbound
+            .iter()
+            .map(|e| e.timestamp)
+            .min()
+            .unwrap_or_default(),
+        last_seen: inbound
+            .iter()
+            .map(|e| e.timestamp)
             .max()
             .unwrap_or_default(),
     }]

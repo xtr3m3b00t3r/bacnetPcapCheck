@@ -5,7 +5,7 @@ mod common;
 use common::*;
 
 use baccheck_core::detect::{
-    broadcast_storm, duplicate_bbmd, duplicate_device_id, unresponsive_device,
+    broadcast_storm, duplicate_bbmd, duplicate_device_id, incomplete_bdt, unresponsive_device,
 };
 use baccheck_core::report::{IssueId, Severity};
 
@@ -641,4 +641,103 @@ fn a_bbmd_outside_the_duplicate_episode_is_not_named() {
         .map(|d| d.ip.to_string())
         .collect();
     assert_eq!(ips, ["10.0.1.2", "10.0.2.2"]);
+}
+
+#[test]
+fn a_peer_forwarding_in_while_no_local_broadcast_comes_back_is_a_low_finding_naming_the_peer() {
+    let mut records = local_broadcasts(50);
+    records.push(forwarded_from(
+        51,
+        60,
+        "10.0.5.1:47808",
+        "10.0.9.9:47808",
+        1,
+    ));
+    records.push(forwarded_from(
+        52,
+        70,
+        "10.0.5.1:47808",
+        "10.0.9.8:47808",
+        2,
+    ));
+
+    let findings = incomplete_bdt(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::IncompleteBdt);
+    assert_eq!(f.severity, Severity::Low);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("10.0.5.1:47808").ip());
+    assert_eq!(f.occurrences, 2);
+    assert_eq!(f.evidence.frames, vec![51, 52]);
+    assert_eq!(f.first_seen, Duration::from_secs(60));
+    assert_eq!(f.last_seen, Duration::from_secs(70));
+    assert!(f.evidence.summary.contains("single-vantage"));
+}
+
+#[test]
+fn incomplete_bdt_stays_silent_below_the_local_broadcast_floor() {
+    let mut records = local_broadcasts(49);
+    records.push(forwarded_from(
+        50,
+        60,
+        "10.0.5.1:47808",
+        "10.0.9.9:47808",
+        1,
+    ));
+
+    assert!(incomplete_bdt(&records).is_empty());
+}
+
+#[test]
+fn incomplete_bdt_stays_silent_when_a_local_broadcast_is_relayed_back() {
+    let mut records = local_broadcasts(50);
+    records.push(forwarded_from(
+        51,
+        60,
+        "10.0.5.1:47808",
+        "10.0.9.9:47808",
+        1,
+    ));
+    records.push(forwarded_from(
+        52,
+        61,
+        "10.0.5.1:47808",
+        "10.0.0.5:47808",
+        2,
+    ));
+
+    assert!(incomplete_bdt(&records).is_empty());
+}
+
+#[test]
+fn incomplete_bdt_never_escalates_however_much_evidence_there_is() {
+    let mut records = local_broadcasts(500);
+    for n in 0..100 {
+        let peer = format!("10.0.{}.1:47808", 5 + n % 4);
+        records.push(forwarded_from(501 + n, 600 + n, &peer, "10.0.9.9:47808", n));
+    }
+
+    let findings = incomplete_bdt(&records);
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::Low);
+    assert_eq!(findings[0].affected.len(), 4);
+    assert_eq!(findings[0].occurrences, 100);
+    assert_eq!(findings[0].evidence.frames.len(), 5);
+}
+
+#[test]
+fn incomplete_bdt_ignores_a_forwarder_that_is_itself_a_local_host() {
+    let mut records = local_broadcasts(50);
+    records.push(forwarded_from(
+        51,
+        60,
+        "10.0.0.5:47808",
+        "10.0.9.9:47808",
+        1,
+    ));
+
+    assert!(incomplete_bdt(&records).is_empty());
 }

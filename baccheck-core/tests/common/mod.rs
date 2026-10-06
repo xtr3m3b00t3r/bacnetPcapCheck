@@ -180,3 +180,32 @@ pub fn forwarded_npdu(frame_no: u64, secs: u64, forwarder: &str, hash: u64) -> D
         payload_hash: hash,
     }
 }
+
+/// A Forwarded-NPDU relayed by `forwarder` whose embedded original source is `original`.
+pub fn forwarded_from(
+    frame_no: u64,
+    secs: u64,
+    forwarder: &str,
+    original: &str,
+    hash: u64,
+) -> DecodeRecord {
+    match forwarded_npdu(frame_no, secs, forwarder, hash) {
+        DecodeRecord::ForwardedNpdu {
+            envelope,
+            payload_hash,
+            ..
+        } => DecodeRecord::ForwardedNpdu {
+            envelope,
+            original_source: addr(original),
+            payload_hash,
+        },
+        other => other,
+    }
+}
+
+/// `count` Who-Is broadcasts from hosts on the local segment, frames 1..=count, one per second.
+pub fn local_broadcasts(count: u64) -> Vec<DecodeRecord> {
+    (0..count)
+        .map(|n| who_is(n + 1, n, "10.0.0.5:47808", "10.0.0.255:47808"))
+        .collect()
+}
