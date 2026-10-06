@@ -1,6 +1,10 @@
 #!/bin/sh
 # Same checks as CI. Enable once per clone: git config core.hooksPath .githooks
-set -e
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --quiet
+# Output is shown only when a check fails.
+out=$(mktemp)
+trap 'rm -f "$out"' EXIT
+{
+    cargo fmt --check &&
+    cargo clippy --quiet --all-targets -- -D warnings &&
+    cargo test --quiet
+} >"$out" 2>&1 || { cat "$out"; exit 1; }

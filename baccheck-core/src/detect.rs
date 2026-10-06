@@ -1,51 +1,7 @@
 //! Seam 3: the ten pure-function detectors (`stream -> Vec<Finding>`) over the decode seam's output.
 //!
-//! See wayfinder ticket #4 for the decided rules. [`detect_all`] runs every detector that exists.
-//!
-//! Contract for `duplicate_device_id` (one test per line, in `tests/detect.rs`):
-//! - An I-Am claiming one device instance from two or more distinct source IP:port pairs is a
-//!   High finding, one per instance.
-//! - Three or more distinct source IPs make it Critical.
-//! - Device instance 4194303 is the wildcard and never counts.
-//! - One address sending many I-Ams for one instance is not a duplicate.
-//!
-//! Contract for `unresponsive_device` (one test per line, in `tests/detect.rs`):
-//! - A confirmed request is answered by an ack, error, reject or abort with the same invoke ID and
-//!   reversed addresses, within 10 s of the request's last transmission.
-//! - Retransmissions of an unanswered request, each within 10 s of the last, count once; a reused invoke ID after an answer is a new request.
-//! - Judged per responder: silent below 10 requests received; Medium under 50% answered, High under 20%.
-//! - Evidence lists at most five unanswered request frames and states the single-vantage caveat.
-//!
-//! Contract for `broadcast_storm` (one test per line, in `tests/detect.rs`):
-//! - Stays silent below the evidence floor: capture span under 5 minutes, or (for the saturation
-//!   trigger) under 200 decoded BACnet messages.
-//! - Fires High on any trigger: more than 10 global Who-Is/s, or more than 50 broadcast I-Am/s,
-//!   in a fixed 60 s bucket counted from the capture start; or broadcasts above 30% of decoded BACnet messages.
-//! - Escalates to Critical above 25 broadcasting sources or a broadcast share above 50%.
-//! - Broadcast context is the limited broadcast address, or an `x.x.x.255` destination inside a
-//!   /24 that the capture's own source addresses occupy.
-//! - Evidence names the triggers, the peak window, at most five top talkers, and the capture's
-//!   undecodable/non-BACnet proportion, with a verify-the-source note when that is high.
-//!
-//! Contract for `duplicate_bbmd` (one test per line, in `tests/detect.rs`):
-//! - One forwarded broadcast (same original source and NPDU bytes) relayed by two or more distinct
-//!   forwarding IPs, each sighting within 60 s of the last, is a High finding; three or more IPs
-//!   make it Critical. A repeat after a longer silence is a new broadcast.
-//! - One forwarded broadcast seen more than 5 times in a fixed 60 s bucket counted from the capture
-//!   start is a High forwarding loop; more than 20 makes it Critical. Needs a 5 minute capture span.
-//! - The duplicate-forwarder trigger has no span floor: it needs no rate, only two sightings.
-//! - One finding covers every offending broadcast: severity is the worst of them, affected devices
-//!   are the forwarding BBMDs involved, and evidence carries at most five frames.
-//!
-//! Contract for `incomplete_bdt` (one test per line, in `tests/detect.rs`):
-//! - Local hosts are the source IPs that sent a broadcast themselves, not a relayed one. No subnet
-//!   mask is assumed for the local/remote split.
-//! - A peer BBMD relaying broadcasts into the segment, while no Forwarded-NPDU carries a local
-//!   host as its original source, is a Low finding naming the peer BBMD(s). It never escalates.
-//! - Stays silent below 50 local broadcasts. There is no span floor: it is not a rate rule.
-//! - A host that forwards is never local: its own broadcasts do not count towards the floor.
-//! - Only a Forwarded-NPDU sent to broadcast context counts as relaying into the segment.
-//! - Evidence carries at most five frames and states that this is a single-vantage inference.
+//! The rules live in issue #4 (`gh issue view 4 --comments`), numbered; [`detect_all`] runs every
+//! detector that exists.
 
 pub mod thresholds;
 
