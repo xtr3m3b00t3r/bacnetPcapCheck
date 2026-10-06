@@ -1,7 +1,6 @@
 //! Seam 3: the ten pure-function detectors (`stream -> Vec<Finding>`) over the decode seam's output.
 //!
-//! Implemented so far: [`duplicate_device_id`], [`broadcast_storm`] and [`unresponsive_device`]. The others are separate tickets; see wayfinder
-//! ticket #4 for the decided rules. [`detect_all`] runs every detector that exists.
+//! See wayfinder ticket #4 for the decided rules. [`detect_all`] runs every detector that exists.
 //!
 //! Contract for `duplicate_device_id` (one test per line, in `tests/detect.rs`):
 //! - An I-Am claiming one device instance from two or more distinct source IP:port pairs is a
