@@ -12,12 +12,16 @@
 //! - Non-BACnet traffic (wrong port, non-BVLC payload) decodes to `None` — skipped from the
 //!   decode stream, counted separately by the caller.
 //!
-//! Scope note: BVLC functions other than Original-Unicast-NPDU, Original-Broadcast-NPDU, and
-//! BVLC-Result (e.g. Forwarded-NPDU, foreign-device/BDT management) become `Undecoded` for now.
-//! They matter to the duplicate-BBMD/forwarding-loop detector, a separate ticket that can extend
-//! this seam when it needs them.
+//! - Forwarded-NPDU (BVLC function 0x04) decodes to its embedded original source and a hash of the
+//!   original source plus NPDU bytes, so a detector can recognise one broadcast seen twice.
+//!
+//! Scope note: BVLC functions other than Original-Unicast-NPDU, Original-Broadcast-NPDU,
+//! Forwarded-NPDU and BVLC-Result (e.g. foreign-device/BDT management) become `Undecoded` for now.
+//! The foreign-device and BDT detectors can extend this seam when they need them.
 
-use std::net::SocketAddr;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use bacnet_rs::app::Apdu;
@@ -100,6 +104,13 @@ pub enum DecodeRecord {
         envelope: Envelope,
         result_code: u16,
     },
+    /// A BBMD relaying a broadcast; `envelope.src` is the forwarding BBMD.
+    ForwardedNpdu {
+        envelope: Envelope,
+        original_source: SocketAddr,
+        /// Hash of the original source and the forwarded NPDU bytes; equal for a repeated broadcast.
+        payload_hash: u64,
+    },
     NetworkMessage {
         envelope: Envelope,
         message_type: u8,
@@ -158,6 +169,7 @@ pub fn decode_packet(packet: &RawPacket) -> Option<DecodeRecord> {
         BvlcFunction::OriginalUnicastNpdu | BvlcFunction::OriginalBroadcastNpdu => {
             Some(decode_npdu(envelope, &packet.payload[4..]))
         }
+        BvlcFunction::ForwardedNpdu => Some(decode_forwarded_npdu(envelope, &packet.payload)),
         other => Some(DecodeRecord::Undecoded {
             envelope,
             reason: format!("BVLC function {other:?} not decoded by this seam"),
@@ -177,6 +189,28 @@ fn decode_bvlc_result(envelope: Envelope, payload: &[u8]) -> DecodeRecord {
             envelope,
             reason: "BVLC-Result: truncated before result code".to_string(),
         },
+    }
+}
+
+/// Forwarded-NPDU: 4-byte BVLC header, 6-byte original source (IPv4 + port), then the NPDU.
+fn decode_forwarded_npdu(envelope: Envelope, payload: &[u8]) -> DecodeRecord {
+    let Some(source) = payload.get(4..10) else {
+        return DecodeRecord::Undecoded {
+            envelope,
+            reason: "Forwarded-NPDU: truncated before original source".to_string(),
+        };
+    };
+    let original_source = SocketAddr::from((
+        Ipv4Addr::new(source[0], source[1], source[2], source[3]),
+        u16::from_be_bytes([source[4], source[5]]),
+    ));
+    let mut hasher = DefaultHasher::new();
+    original_source.hash(&mut hasher);
+    payload[10..].hash(&mut hasher);
+    DecodeRecord::ForwardedNpdu {
+        envelope,
+        original_source,
+        payload_hash: hasher.finish(),
     }
 }
 

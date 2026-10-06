@@ -49,3 +49,20 @@ pub const UNRESPONSIVE_MEDIUM_BELOW: f64 = 0.50;
 
 /// Answered share of received requests below which a device is High.
 pub const UNRESPONSIVE_HIGH_BELOW: f64 = 0.20;
+
+/// Gap in sightings of one forwarded broadcast after which it counts as a new broadcast. Forwarders
+/// relaying the same bytes further apart than this are not duplicate BBMDs: periodic broadcasts
+/// repeat byte for byte.
+pub const FORWARD_DUPLICATE_WINDOW: Duration = Duration::from_secs(60);
+
+/// Distinct forwarding IPs relaying one broadcast at which BBMDs count as duplicates.
+pub const FORWARD_DUPLICATE_FORWARDERS: usize = 2;
+
+/// Distinct forwarding IPs relaying one broadcast at which duplicate BBMDs are Critical.
+pub const FORWARD_CRITICAL_FORWARDERS: usize = 3;
+
+/// Sightings of one forwarded broadcast, in one bucket, above which the forwarding-loop trigger fires.
+pub const FORWARD_LOOP_PER_BUCKET: u64 = 5;
+
+/// Sightings of one forwarded broadcast, in one bucket, above which a forwarding loop is Critical.
+pub const FORWARD_LOOP_CRITICAL_PER_BUCKET: u64 = 20;

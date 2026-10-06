@@ -4,7 +4,9 @@ mod common;
 
 use common::*;
 
-use baccheck_core::detect::{broadcast_storm, duplicate_device_id, unresponsive_device};
+use baccheck_core::detect::{
+    broadcast_storm, duplicate_bbmd, duplicate_device_id, unresponsive_device,
+};
 use baccheck_core::report::{IssueId, Severity};
 
 #[test]
@@ -458,4 +460,185 @@ fn an_invoke_id_reused_after_silence_is_a_new_request() {
 
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].occurrences, 10);
+}
+
+#[test]
+fn one_broadcast_relayed_by_two_bbmds_is_a_high_finding_naming_both() {
+    let records = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 11, "10.0.2.2:47808", 7),
+    ];
+
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+
+    assert_eq!(findings.len(), 1);
+    let finding = &findings[0];
+    assert_eq!(finding.issue, IssueId::DuplicateBbmd);
+    assert_eq!(finding.severity, Severity::High);
+    let ips: Vec<String> = finding.affected.iter().map(|d| d.ip.to_string()).collect();
+    assert_eq!(ips, ["10.0.1.2", "10.0.2.2"]);
+    assert_eq!(finding.occurrences, 2);
+    assert_eq!(finding.evidence.frames, [1, 2]);
+    assert_eq!(finding.first_seen, Duration::from_secs(10));
+    assert_eq!(finding.last_seen, Duration::from_secs(11));
+}
+
+#[test]
+fn two_bbmds_relaying_different_broadcasts_is_not_a_duplicate() {
+    let records = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 11, "10.0.2.2:47808", 8),
+    ];
+    assert!(duplicate_bbmd(&records, &decoded_stats(600, &records)).is_empty());
+}
+
+#[test]
+fn a_hash_reused_by_another_bbmd_after_silence_is_a_new_broadcast() {
+    let records = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 3_000, "10.0.2.2:47808", 7),
+    ];
+    assert!(duplicate_bbmd(&records, &decoded_stats(3_600, &records)).is_empty());
+}
+
+#[test]
+fn three_bbmds_relaying_one_broadcast_is_critical() {
+    let records = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 11, "10.0.2.2:47808", 7),
+        forwarded_npdu(3, 12, "10.0.3.2:47808", 7),
+    ];
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+    assert_eq!(findings[0].severity, Severity::Critical);
+}
+
+#[test]
+fn six_repeats_in_one_minute_is_a_high_loop_finding() {
+    let records: Vec<_> = (0..6)
+        .map(|n| forwarded_npdu(n + 1, 10 + n * 5, "10.0.1.2:47808", 7))
+        .collect();
+
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::High);
+    assert_eq!(findings[0].affected.len(), 1);
+    assert_eq!(findings[0].occurrences, 6);
+}
+
+#[test]
+fn five_repeats_in_one_minute_stays_silent() {
+    let records: Vec<_> = (0..5)
+        .map(|n| forwarded_npdu(n + 1, 10 + n * 5, "10.0.1.2:47808", 7))
+        .collect();
+    assert!(duplicate_bbmd(&records, &decoded_stats(600, &records)).is_empty());
+}
+
+#[test]
+fn repeats_spread_over_several_minutes_stay_silent() {
+    let records: Vec<_> = (0..6)
+        .map(|n| forwarded_npdu(n + 1, n * 90, "10.0.1.2:47808", 7))
+        .collect();
+    assert!(duplicate_bbmd(&records, &decoded_stats(600, &records)).is_empty());
+}
+
+#[test]
+fn more_than_twenty_repeats_in_one_minute_is_critical() {
+    let records: Vec<_> = (0..21)
+        .map(|n| forwarded_npdu(n + 1, 10 + n, "10.0.1.2:47808", 7))
+        .collect();
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+    assert_eq!(findings[0].severity, Severity::Critical);
+}
+
+#[test]
+fn twenty_repeats_in_one_minute_is_still_high() {
+    let records: Vec<_> = (0..20)
+        .map(|n| forwarded_npdu(n + 1, 10 + n, "10.0.1.2:47808", 7))
+        .collect();
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+    assert_eq!(findings[0].severity, Severity::High);
+}
+
+#[test]
+fn the_loop_rate_needs_a_five_minute_capture_but_two_bbmds_do_not() {
+    let looping: Vec<_> = (0..6)
+        .map(|n| forwarded_npdu(n + 1, 10 + n, "10.0.1.2:47808", 7))
+        .collect();
+    assert!(duplicate_bbmd(&looping, &decoded_stats(299, &looping)).is_empty());
+
+    let two_bbmds = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 11, "10.0.2.2:47808", 7),
+    ];
+    assert_eq!(
+        duplicate_bbmd(&two_bbmds, &decoded_stats(299, &two_bbmds)).len(),
+        1
+    );
+}
+
+#[test]
+fn repeat_buckets_are_counted_from_the_capture_start() {
+    // Epoch-aligned buckets would split these six across the minute boundary at 1_700_000_080.
+    let origin = 1_700_000_050;
+    let records: Vec<_> = (0..6)
+        .map(|n| forwarded_npdu(n + 1, origin + 5 + n * 5, "10.0.1.2:47808", 7))
+        .collect();
+    let capture = stats(600, records.len() as u64, 0, 0);
+    let capture = baccheck_core::report::CaptureStats {
+        first_timestamp: Some(Duration::from_secs(origin)),
+        last_timestamp: Some(Duration::from_secs(origin + 600)),
+        ..capture
+    };
+    assert_eq!(duplicate_bbmd(&records, &capture).len(), 1);
+}
+
+#[test]
+fn bbmd_evidence_carries_at_most_five_frames_and_one_finding_covers_every_hash() {
+    let mut records: Vec<_> = (0..8)
+        .map(|n| forwarded_npdu(n + 1, 10 + n, "10.0.1.2:47808", 7))
+        .collect();
+    records.push(forwarded_npdu(20, 30, "10.0.5.2:47808", 9));
+    records.push(forwarded_npdu(21, 31, "10.0.6.2:47808", 9));
+
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].evidence.frames.len(), 5);
+    assert_eq!(findings[0].affected.len(), 3);
+    assert_eq!(findings[0].occurrences, 10);
+}
+
+#[test]
+fn bbmd_severity_is_the_worst_across_hashes() {
+    let mut records = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 11, "10.0.2.2:47808", 7),
+    ];
+    records.extend((0..3).map(|n| {
+        forwarded_npdu(
+            10 + n,
+            20,
+            ["10.0.3.2:47808", "10.0.4.2:47808", "10.0.5.2:47808"][n as usize],
+            9,
+        )
+    }));
+    let findings = duplicate_bbmd(&records, &decoded_stats(600, &records));
+    assert_eq!(findings[0].severity, Severity::Critical);
+}
+
+#[test]
+fn a_bbmd_outside_the_duplicate_episode_is_not_named() {
+    let records = vec![
+        forwarded_npdu(1, 10, "10.0.1.2:47808", 7),
+        forwarded_npdu(2, 11, "10.0.2.2:47808", 7),
+        forwarded_npdu(3, 3_000, "10.0.3.2:47808", 7),
+    ];
+    let findings = duplicate_bbmd(&records, &decoded_stats(3_600, &records));
+    let ips: Vec<String> = findings[0]
+        .affected
+        .iter()
+        .map(|d| d.ip.to_string())
+        .collect();
+    assert_eq!(ips, ["10.0.1.2", "10.0.2.2"]);
 }

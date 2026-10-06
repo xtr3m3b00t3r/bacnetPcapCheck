@@ -26,6 +26,16 @@
 //!   /24 that the capture's own source addresses occupy.
 //! - Evidence names the triggers, the peak window, at most five top talkers, and the capture's
 //!   undecodable/non-BACnet proportion, with a verify-the-source note when that is high.
+//!
+//! Contract for `duplicate_bbmd` (one test per line, in `tests/detect.rs`):
+//! - One forwarded broadcast (same original source and NPDU bytes) relayed by two or more distinct
+//!   forwarding IPs, each sighting within 60 s of the last, is a High finding; three or more IPs
+//!   make it Critical. A repeat after a longer silence is a new broadcast.
+//! - One forwarded broadcast seen more than 5 times in a fixed 60 s bucket counted from the capture
+//!   start is a High forwarding loop; more than 20 makes it Critical. Needs a 5 minute capture span.
+//! - The duplicate-forwarder trigger has no span floor: it needs no rate, only two sightings.
+//! - One finding covers every offending broadcast: severity is the worst of them, affected devices
+//!   are the forwarding BBMDs involved, and evidence carries at most five frames.
 
 pub mod thresholds;
 
@@ -47,6 +57,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     let mut findings = duplicate_device_id(records);
     findings.extend(broadcast_storm(records, stats));
     findings.extend(unresponsive_device(records));
+    findings.extend(duplicate_bbmd(records, stats));
     findings
 }
 
@@ -178,6 +189,7 @@ fn envelope_of(record: &DecodeRecord) -> Option<&crate::decode::Envelope> {
         DecodeRecord::WhoIs { envelope, .. }
         | DecodeRecord::IAm { envelope, .. }
         | DecodeRecord::BvlcResult { envelope, .. }
+        | DecodeRecord::ForwardedNpdu { envelope, .. }
         | DecodeRecord::NetworkMessage { envelope, .. }
         | DecodeRecord::Apdu { envelope, .. } => Some(envelope),
     }
@@ -472,4 +484,152 @@ fn unresponsive_finding(
             .max()
             .unwrap_or_default(),
     })
+}
+
+/// One sighting of a Forwarded-NPDU.
+struct Forwarded {
+    frame: u64,
+    timestamp: Duration,
+    forwarder: SocketAddr,
+}
+
+/// What one repeated forwarded broadcast showed.
+struct Offence {
+    severity: Severity,
+    forwarders: BTreeSet<SocketAddr>,
+    sightings: Vec<Forwarded>,
+}
+
+/// Judges one broadcast's sightings (chronological) against both triggers.
+fn forwarded_offence(
+    sightings: Vec<Forwarded>,
+    capture_start: Duration,
+    rate_rule_may_fire: bool,
+) -> Option<Offence> {
+    let base = IssueId::DuplicateBbmd.spec().base_severity;
+    let mut severity: Option<Severity> = None;
+
+    // Duplicate forwarders: distinct IPs within one episode, which ends after a quiet gap. Only
+    // forwarders from an episode that crossed the threshold are named.
+    let mut episode: BTreeSet<SocketAddr> = BTreeSet::new();
+    let mut offenders: BTreeSet<SocketAddr> = BTreeSet::new();
+    let mut previous: Option<Duration> = None;
+    for sighting in &sightings {
+        if previous.is_some_and(|p| sighting.timestamp.saturating_sub(p) > FORWARD_DUPLICATE_WINDOW)
+        {
+            episode.clear();
+        }
+        previous = Some(sighting.timestamp);
+        episode.insert(sighting.forwarder);
+        let distinct_ips = episode
+            .iter()
+            .map(SocketAddr::ip)
+            .collect::<BTreeSet<IpAddr>>()
+            .len();
+        if distinct_ips >= FORWARD_DUPLICATE_FORWARDERS {
+            offenders.extend(episode.iter().copied());
+            severity = severity.max(Some(base));
+        }
+        if distinct_ips >= FORWARD_CRITICAL_FORWARDERS {
+            severity = Some(Severity::Critical);
+        }
+    }
+
+    if rate_rule_may_fire {
+        let events: Vec<(Duration, u64)> =
+            sightings.iter().map(|s| (s.timestamp, s.frame)).collect();
+        if let Some((_, count, _)) = peak_bucket(&events, capture_start) {
+            if count > FORWARD_LOOP_PER_BUCKET {
+                offenders.extend(sightings.iter().map(|s| s.forwarder));
+                severity = severity.max(Some(base));
+            }
+            if count > FORWARD_LOOP_CRITICAL_PER_BUCKET {
+                severity = Some(Severity::Critical);
+            }
+        }
+    }
+
+    let severity = severity?;
+    Some(Offence {
+        severity,
+        forwarders: offenders,
+        sightings,
+    })
+}
+
+/// Recognises one broadcast relayed twice: by several BBMDs (duplicate BBMD) or many times in a
+/// minute (forwarding loop). Identity is the Forwarded-NPDU's original source plus NPDU bytes.
+pub fn duplicate_bbmd(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding> {
+    let capture_start = stats.first_timestamp.unwrap_or_default();
+    let rate_rule_may_fire = stats.span() >= RATE_RULE_MIN_SPAN;
+
+    let mut by_hash: BTreeMap<u64, Vec<Forwarded>> = BTreeMap::new();
+    for record in records {
+        if let DecodeRecord::ForwardedNpdu {
+            envelope,
+            payload_hash,
+            ..
+        } = record
+        {
+            by_hash.entry(*payload_hash).or_default().push(Forwarded {
+                frame: envelope.frame_no,
+                timestamp: envelope.timestamp,
+                forwarder: envelope.src,
+            });
+        }
+    }
+
+    let offences: Vec<Offence> = by_hash
+        .into_values()
+        .filter_map(|sightings| forwarded_offence(sightings, capture_start, rate_rule_may_fire))
+        .collect();
+    let Some(severity) = offences.iter().map(|o| o.severity).max() else {
+        return Vec::new();
+    };
+
+    let forwarders: BTreeSet<SocketAddr> = offences
+        .iter()
+        .flat_map(|o| o.forwarders.iter().copied())
+        .collect();
+    let sightings: Vec<&Forwarded> = offences.iter().flat_map(|o| &o.sightings).collect();
+    let mut frames: Vec<u64> = sightings.iter().map(|s| s.frame).collect();
+    frames.sort_unstable();
+    frames.truncate(MAX_EVIDENCE_FRAMES);
+
+    let forwarder_text = forwarders
+        .iter()
+        .map(SocketAddr::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let summary = format!(
+        "{} forwarded broadcast(s) were relayed repeatedly: {} sightings via {forwarder_text}. \
+         Either several BBMDs relay the same broadcast, or one broadcast is looping between BBMDs.",
+        offences.len(),
+        sightings.len()
+    );
+
+    vec![Finding {
+        issue: IssueId::DuplicateBbmd,
+        severity,
+        affected: forwarders
+            .iter()
+            .map(|addr| DeviceRef {
+                device_instance: None,
+                ip: addr.ip(),
+                port: Some(addr.port()),
+            })
+            .collect(),
+        occurrences: sightings.len() as u64,
+        evidence: Evidence { summary, frames },
+        first_seen: sightings
+            .iter()
+            .map(|s| s.timestamp)
+            .min()
+            .unwrap_or_default(),
+        last_seen: sightings
+            .iter()
+            .map(|s| s.timestamp)
+            .max()
+            .unwrap_or_default(),
+    }]
 }

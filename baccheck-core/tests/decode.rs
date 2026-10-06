@@ -304,3 +304,69 @@ fn non_bvlc_payload_on_the_bacnet_port_is_not_decoded() {
 
     assert_eq!(decode_packet(&packet), None);
 }
+
+/// BVLC Forwarded-NPDU: 4-byte header, 6-byte original source (IPv4 + port), then the NPDU.
+fn forwarded_payload(original: [u8; 6], npdu_and_beyond: &[u8]) -> Vec<u8> {
+    let mut body = original.to_vec();
+    body.extend_from_slice(npdu_and_beyond);
+    bvlc_frame(BvlcFunction::ForwardedNpdu, &body)
+}
+
+fn forwarded_record(payload: Vec<u8>) -> DecodeRecord {
+    let packet = raw_packet(7, addr("10.0.1.2:47808"), addr("10.0.0.255:47808"), payload);
+    decode_packet(&packet).expect("decodes as BACnet traffic")
+}
+
+#[test]
+fn decodes_forwarded_npdu_to_its_original_source_and_payload_hash() {
+    // Original source 10.0.2.9:47808 (0xBAC0).
+    let original = [10, 0, 2, 9, 0xBA, 0xC0];
+    let record = forwarded_record(forwarded_payload(original, &[0x01, 0x00, 0x10, 0x08]));
+
+    let DecodeRecord::ForwardedNpdu {
+        envelope,
+        original_source,
+        ..
+    } = record
+    else {
+        panic!("expected ForwardedNpdu, got {record:?}");
+    };
+    assert_eq!(envelope.frame_no, 7);
+    assert_eq!(envelope.src, addr("10.0.1.2:47808"));
+    assert_eq!(original_source, addr("10.0.2.9:47808"));
+}
+
+#[test]
+fn forwarded_npdu_hash_covers_payload_and_original_source() {
+    let npdu = [0x01, 0x00, 0x10, 0x08];
+    let hash_of = |record: DecodeRecord| match record {
+        DecodeRecord::ForwardedNpdu { payload_hash, .. } => payload_hash,
+        other => panic!("expected ForwardedNpdu, got {other:?}"),
+    };
+    let base = hash_of(forwarded_record(forwarded_payload(
+        [10, 0, 2, 9, 0xBA, 0xC0],
+        &npdu,
+    )));
+    let same = hash_of(forwarded_record(forwarded_payload(
+        [10, 0, 2, 9, 0xBA, 0xC0],
+        &npdu,
+    )));
+    let other_payload = hash_of(forwarded_record(forwarded_payload(
+        [10, 0, 2, 9, 0xBA, 0xC0],
+        &[0x01, 0x00, 0x10, 0x09],
+    )));
+    let other_source = hash_of(forwarded_record(forwarded_payload(
+        [10, 0, 2, 8, 0xBA, 0xC0],
+        &npdu,
+    )));
+
+    assert_eq!(base, same);
+    assert_ne!(base, other_payload);
+    assert_ne!(base, other_source);
+}
+
+#[test]
+fn truncated_forwarded_npdu_is_undecoded_not_a_panic() {
+    let record = forwarded_record(bvlc_frame(BvlcFunction::ForwardedNpdu, &[10, 0, 2]));
+    assert!(matches!(record, DecodeRecord::Undecoded { .. }));
+}

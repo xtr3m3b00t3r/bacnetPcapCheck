@@ -165,3 +165,18 @@ pub fn requests_to_device(total: u8, answered: u8) -> Vec<DecodeRecord> {
     }
     records
 }
+
+/// A Forwarded-NPDU relayed by `forwarder` to the local broadcast address; `hash` stands for the
+/// forwarded broadcast, so equal hashes are one broadcast seen again.
+pub fn forwarded_npdu(frame_no: u64, secs: u64, forwarder: &str, hash: u64) -> DecodeRecord {
+    DecodeRecord::ForwardedNpdu {
+        envelope: Envelope {
+            frame_no,
+            timestamp: Duration::from_secs(secs),
+            src: addr(forwarder),
+            dst: addr("10.0.0.255:47808"),
+        },
+        original_source: addr("10.0.9.9:47808"),
+        payload_hash: hash,
+    }
+}
