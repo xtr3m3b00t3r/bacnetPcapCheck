@@ -13,7 +13,7 @@
 //! Contract for `unresponsive_device` (one test per line, in `tests/detect.rs`):
 //! - A confirmed request is answered by an ack, error, reject or abort with the same invoke ID and
 //!   reversed addresses, within 10 s of the request's last transmission.
-//! - Retransmissions of an unanswered request count once; a reused invoke ID after an answer is a new request.
+//! - Retransmissions of an unanswered request, each within 10 s of the last, count once; a reused invoke ID after an answer is a new request.
 //! - Judged per responder: silent below 10 requests received; Medium under 50% answered, High under 20%.
 //! - Evidence lists at most five unanswered request frames and states the single-vantage caveat.
 //!
@@ -370,8 +370,14 @@ pub fn unresponsive_device(records: &[DecodeRecord]) -> Vec<Finding> {
             DecodeRecord::Apdu { envelope, header } => match header {
                 ApduHeader::ConfirmedRequest { invoke_id, .. } => {
                     let key = confirmed_key(envelope, *invoke_id);
-                    match open.get(&key) {
-                        Some(&index) => requests[index].last_sent = envelope.timestamp,
+                    // A repeat is a retransmission only while the previous send is within the
+                    // response window; later than that, the invoke ID has been reused.
+                    let retransmitted = open.get(&key).copied().filter(|&index| {
+                        envelope.timestamp.saturating_sub(requests[index].last_sent)
+                            <= RESPONSE_WINDOW
+                    });
+                    match retransmitted {
+                        Some(index) => requests[index].last_sent = envelope.timestamp,
                         None => {
                             open.insert(key, requests.len());
                             requests.push(Request {

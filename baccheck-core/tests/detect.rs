@@ -446,3 +446,16 @@ fn a_reused_invoke_id_is_a_new_request() {
     // 11 requests, the late one unanswered: 10/11 answered, silent.
     assert!(unresponsive_device(&records).is_empty());
 }
+
+#[test]
+fn an_invoke_id_reused_after_silence_is_a_new_request() {
+    // Ten requests to one device, all unanswered, every one reusing invoke ID 1 a minute apart.
+    let records: Vec<_> = (0..10u64)
+        .map(|n| confirmed_request(n + 1, n * 60, "10.0.0.5:47808", "10.0.0.9:47808", 1))
+        .collect();
+
+    let findings = unresponsive_device(&records);
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].occurrences, 10);
+}
