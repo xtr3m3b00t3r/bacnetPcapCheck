@@ -44,5 +44,6 @@ pub fn analyse_capture(path: &Path) -> Result<Report, PcapError> {
         }
     }
 
-    Ok(Report::build(stats, detect::detect_all(&records)))
+    let findings = detect::detect_all(&records, &stats);
+    Ok(Report::build(stats, findings))
 }
