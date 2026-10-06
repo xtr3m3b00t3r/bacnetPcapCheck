@@ -1,0 +1,6 @@
+#!/bin/sh
+# Same checks as CI. Enable once per clone: git config core.hooksPath .githooks
+set -e
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --quiet
