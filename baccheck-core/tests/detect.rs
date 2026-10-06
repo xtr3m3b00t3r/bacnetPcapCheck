@@ -394,3 +394,37 @@ fn evidence_names_at_most_five_top_talkers_busiest_first() {
         .summary
         .contains("10.0.0.11:47808 (400)"));
 }
+
+#[test]
+fn peak_window_is_reported_relative_to_the_capture_start() {
+    // Real captures carry epoch timestamps; the window must read as an offset, not an epoch.
+    let epoch = 1_700_000_000u64;
+    let mut records: Vec<_> = (0..700)
+        .map(|n| {
+            who_is(
+                n + 1,
+                epoch + 120 + n * 60 / 700,
+                "10.0.0.9:47808",
+                "10.0.0.255:47808",
+            )
+        })
+        .collect();
+    records.extend((0..1800).map(|n| {
+        unicast_apdu(
+            10_000 + n,
+            epoch + n * 600 / 1800,
+            "10.0.0.5:47808",
+            "10.0.0.6:47808",
+        )
+    }));
+    let mut capture = decoded_stats(600, &records);
+    capture.first_timestamp = Some(Duration::from_secs(epoch));
+    capture.last_timestamp = Some(Duration::from_secs(epoch + 600));
+
+    let findings = broadcast_storm(&records, &capture);
+
+    assert!(findings[0]
+        .evidence
+        .summary
+        .contains("from 120 s into the capture"));
+}

@@ -14,15 +14,14 @@
 //! - Stays silent below the evidence floor: capture span under 5 minutes, or (for the saturation
 //!   trigger) under 200 decoded BACnet messages.
 //! - Fires High on any trigger: more than 10 global Who-Is/s, or more than 50 broadcast I-Am/s,
-//!   in a fixed 60 s bucket; or broadcasts above 30% of decoded BACnet messages.
+//!   in a fixed 60 s bucket counted from the capture start; or broadcasts above 30% of decoded BACnet messages.
 //! - Escalates to Critical above 25 broadcasting sources or a broadcast share above 50%.
 //! - Broadcast context is the limited broadcast address, or an `x.x.x.255` destination inside a
 //!   /24 that the capture's own source addresses occupy.
 //! - Evidence names the triggers, the peak window, at most five top talkers, and the capture's
 //!   undecodable/non-BACnet proportion, with a verify-the-source note when that is high.
 
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -170,7 +169,7 @@ fn finding_for(instance: u32, claims: BTreeMap<SocketAddr, Claim>) -> Finding {
     }
 }
 
-/// Which of a bucket's messages a trigger counts.
+/// One fired rule: its description for the evidence summary and the frames that tripped it.
 struct Trigger {
     description: String,
     frames: Vec<u64>,
@@ -209,12 +208,13 @@ fn envelope_of(record: &DecodeRecord) -> Option<&crate::decode::Envelope> {
     }
 }
 
-/// Peak bucket of `(timestamp, frame)` events: its start second, count, and frames in capture order.
-fn peak_bucket(events: &[(Duration, u64)]) -> Option<(u64, u64, Vec<u64>)> {
-    let mut buckets: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+/// Peak bucket of `(timestamp, frame)` events, buckets counted from `origin` (the capture start):
+/// its start offset in seconds, count, and frames in capture order.
+fn peak_bucket(events: &[(Duration, u64)], origin: Duration) -> Option<(u64, u64, Vec<u64>)> {
+    let mut buckets: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
     for (timestamp, frame) in events {
         buckets
-            .entry(timestamp.as_secs() / RATE_BUCKET.as_secs())
+            .entry(timestamp.saturating_sub(origin).as_secs() / RATE_BUCKET.as_secs())
             .or_default()
             .push(*frame);
     }
@@ -229,6 +229,7 @@ pub fn broadcast_storm(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fi
     if stats.span() < RATE_RULE_MIN_SPAN {
         return Vec::new();
     }
+    let capture_start = stats.first_timestamp.unwrap_or_default();
     let broadcast_ips = broadcast_destinations(records);
     let is_broadcast = |dst: IpAddr| match dst {
         IpAddr::V4(ip) => ip == Ipv4Addr::BROADCAST || broadcast_ips.contains(&ip),
@@ -239,8 +240,8 @@ pub fn broadcast_storm(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fi
     let mut who_is: Vec<(Duration, u64)> = Vec::new();
     let mut i_am: Vec<(Duration, u64)> = Vec::new();
     let mut broadcasts: Vec<(Duration, u64)> = Vec::new();
-    let mut talkers: std::collections::BTreeMap<SocketAddr, u64> = Default::default();
-    let mut instances: std::collections::BTreeMap<SocketAddr, u32> = Default::default();
+    let mut talkers: BTreeMap<SocketAddr, u64> = Default::default();
+    let mut instances: BTreeMap<SocketAddr, u32> = Default::default();
 
     for record in records {
         let Some(envelope) = envelope_of(record) else {
@@ -277,7 +278,7 @@ pub fn broadcast_storm(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fi
         ("global Who-Is", &who_is, WHO_IS_FLOOD_PER_SEC),
         ("broadcast I-Am", &i_am, I_AM_FLOOD_PER_SEC),
     ] {
-        if let Some((start, count, frames)) = peak_bucket(events) {
+        if let Some((start, count, frames)) = peak_bucket(events, capture_start) {
             if count > per_sec * RATE_BUCKET.as_secs() {
                 triggers.push(Trigger {
                     description: format!(
@@ -346,7 +347,7 @@ pub fn broadcast_storm(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fi
     frames.sort_unstable();
     frames.truncate(MAX_EVIDENCE_FRAMES);
 
-    Vec::from([Finding {
+    vec![Finding {
         issue: IssueId::BroadcastStorm,
         severity,
         affected,
@@ -354,5 +355,5 @@ pub fn broadcast_storm(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Fi
         evidence: Evidence { summary, frames },
         first_seen: broadcasts.iter().map(|(t, _)| *t).min().unwrap_or_default(),
         last_seen: broadcasts.iter().map(|(t, _)| *t).max().unwrap_or_default(),
-    }])
+    }]
 }
