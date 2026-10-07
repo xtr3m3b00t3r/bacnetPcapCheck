@@ -1561,3 +1561,82 @@ fn repeats_after_a_reject_are_new_requests_but_repeats_before_it_count() {
     let findings = confirmed_service_retransmission(&records);
     assert_eq!(findings[0].evidence.frames, vec![2, 3, 20]);
 }
+
+#[test]
+fn an_unanswered_request_repeated_after_the_response_window_is_a_new_request() {
+    // Ten invoke IDs, each sent once, then again 60 s later with no answer in between.
+    let records: Vec<_> = (0..10u8)
+        .map(|n| (n, 0))
+        .chain((0..10u8).map(|n| (n, 60)))
+        .enumerate()
+        .map(|(i, (n, secs))| {
+            confirmed_request(
+                i as u64 + 1,
+                secs + u64::from(n),
+                "10.0.0.5:47808",
+                "10.0.0.9:47808",
+                n,
+            )
+        })
+        .collect();
+
+    assert!(confirmed_service_retransmission(&records).is_empty());
+}
+
+#[test]
+fn a_repeat_inside_the_window_of_the_previous_send_counts_however_long_since_the_first() {
+    // One request sent every 8 s for 10 sends: each repeat is within 10 s of the send before it.
+    let mut records: Vec<_> = (0..10u64)
+        .map(|n| confirmed_request(n + 1, n * 8, "10.0.0.5:47808", "10.0.0.9:47808", 1))
+        .collect();
+    records.push(confirmed_request(
+        11,
+        100,
+        "10.0.0.5:47808",
+        "10.0.0.9:47808",
+        2,
+    ));
+
+    let findings = confirmed_service_retransmission(&records);
+
+    // 11 frames, 9 repeats.
+    assert_eq!(findings[0].occurrences, 9);
+    assert_eq!(findings[0].severity, Severity::High);
+}
+
+#[test]
+fn segments_of_one_segmented_request_are_not_retransmissions() {
+    // Ten plain requests plus a four-segment request: the extra segments are not repeats.
+    let mut records = retransmitting_sender(10, 0, 0);
+    records.extend((0..4u64).map(|n| {
+        segment(
+            20 + n,
+            100 + n,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            50,
+            n < 3,
+        )
+    }));
+
+    assert!(confirmed_service_retransmission(&records).is_empty());
+}
+
+#[test]
+fn senders_are_judged_separately() {
+    let mut records = retransmitting_sender(10, 3, 1);
+    records.extend((0..10u8).map(|n| {
+        confirmed_request(
+            100 + u64::from(n),
+            u64::from(n),
+            "10.0.0.6:47808",
+            "10.0.0.9:47808",
+            n,
+        )
+    }));
+
+    let findings = confirmed_service_retransmission(&records);
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].affected[0].ip, addr("10.0.0.5:47808").ip());
+}

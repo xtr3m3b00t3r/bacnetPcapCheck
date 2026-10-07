@@ -1194,7 +1194,7 @@ pub fn routing_rejection(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<
 
 /// What one sender did with its confirmed requests.
 #[derive(Default)]
-struct Sender {
+struct SenderActivity {
     requests_sent: u64,
     /// (timestamp, frame) of each repeat of a request still awaiting its answer.
     repeats: Vec<(Duration, u64)>,
@@ -1203,8 +1203,9 @@ struct Sender {
 /// Correlates confirmed requests by (sender, responder, invoke ID), the same table as
 /// [`unresponsive_device`] with the opposite attribution: repeats are the sender's fault.
 pub fn confirmed_service_retransmission(records: &[DecodeRecord]) -> Vec<Finding> {
-    let mut senders: BTreeMap<SocketAddr, Sender> = BTreeMap::new();
-    let mut open: BTreeSet<(SocketAddr, SocketAddr, u8)> = BTreeSet::new();
+    let mut senders: BTreeMap<SocketAddr, SenderActivity> = BTreeMap::new();
+    // Time of the last send of each request still awaiting its answer.
+    let mut open: BTreeMap<(SocketAddr, SocketAddr, u8), Duration> = BTreeMap::new();
     let mut instances: BTreeMap<SocketAddr, u32> = BTreeMap::new();
 
     for record in records {
@@ -1217,10 +1218,21 @@ pub fn confirmed_service_retransmission(records: &[DecodeRecord]) -> Vec<Finding
                 instances.insert(envelope.src, *device_instance);
             }
             DecodeRecord::Apdu { envelope, header } => match header {
-                ApduHeader::ConfirmedRequest { invoke_id, .. } => {
+                // Segments of one request share its key; rule 7 owns them.
+                ApduHeader::ConfirmedRequest {
+                    segmented: false,
+                    invoke_id,
+                    ..
+                } => {
                     let sender = senders.entry(envelope.src).or_default();
                     sender.requests_sent += 1;
-                    if !open.insert(confirmed_key(envelope, *invoke_id)) {
+                    // A repeat is a retransmission only while the previous send is within the
+                    // response window; later than that, the invoke ID has been reused.
+                    let previous =
+                        open.insert(confirmed_key(envelope, *invoke_id), envelope.timestamp);
+                    if previous.is_some_and(|sent| {
+                        envelope.timestamp.saturating_sub(sent) <= RESPONSE_WINDOW
+                    }) {
                         sender.repeats.push((envelope.timestamp, envelope.frame_no));
                     }
                 }
@@ -1248,7 +1260,7 @@ pub fn confirmed_service_retransmission(records: &[DecodeRecord]) -> Vec<Finding
 fn retransmission_finding(
     sender: SocketAddr,
     device_instance: Option<u32>,
-    activity: Sender,
+    activity: SenderActivity,
 ) -> Option<Finding> {
     if activity.requests_sent < RETRANSMISSION_MIN_REQUESTS {
         return None;
@@ -1267,7 +1279,7 @@ fn retransmission_finding(
     frames.truncate(MAX_EVIDENCE_FRAMES);
     let summary = format!(
         "{sender} repeated {repeats} of its {} confirmed requests ({:.0}%) before any answer arrived. \
-         Its APDU timeout may be too short, or the device it asks is slow to answer.",
+         Its APDU timeout may be too short, or the network between the two devices may be adding delay.",
         activity.requests_sent,
         share * 100.0
     );
