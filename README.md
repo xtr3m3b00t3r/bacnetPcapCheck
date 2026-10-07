@@ -2,9 +2,9 @@
 
 BACcheck reads a BACnet/IP capture (pcap/pcapng), decodes it, and detects the top ~10
 network problems a field engineer needs to fix — delivered as a field-engineer-facing
-HTML report with prescriptive remediation steps, plus an interactive TUI.
+HTML report with prescriptive remediation steps. An interactive TUI is planned for v2.
 
-In early design; see the [wayfinder map](https://github.com/xtr3m3b00t3r/bacnetPcapCheck/issues/15).
+Design decisions are tracked on the [wayfinder map](https://github.com/xtr3m3b00t3r/bacnetPcapCheck/issues/15).
 
 ## Licence
 
