@@ -1355,7 +1355,7 @@ fn a_forwarded_npdu_is_not_a_unicast_i_am() {
 fn a_single_reject_message_is_a_medium_finding_naming_the_router() {
     let records = [reject_to_network(4, 30, "10.0.0.2:47808", "10.0.0.9:47808")];
 
-    let findings = routing_rejection(&records);
+    let findings = routing_rejection(&records, &stats(600, 0, 0, 0));
 
     assert_eq!(findings.len(), 1);
     let f = &findings[0];
@@ -1381,7 +1381,7 @@ fn other_network_messages_are_silent() {
         })
         .collect();
 
-    assert!(routing_rejection(&records).is_empty());
+    assert!(routing_rejection(&records, &stats(600, 0, 0, 0)).is_empty());
 }
 
 #[test]
@@ -1390,7 +1390,7 @@ fn more_than_ten_rejections_in_one_bucket_from_one_router_is_high() {
         .map(|n| reject_to_network(n + 1, n * 5, "10.0.0.2:47808", "10.0.0.9:47808"))
         .collect();
 
-    let findings = routing_rejection(&records);
+    let findings = routing_rejection(&records, &stats(600, 0, 0, 0));
 
     assert_eq!(findings[0].severity, Severity::High);
     assert_eq!(findings[0].occurrences, 11);
@@ -1403,7 +1403,10 @@ fn ten_rejections_in_one_bucket_stay_medium() {
         .map(|n| reject_to_network(n + 1, n * 5, "10.0.0.2:47808", "10.0.0.9:47808"))
         .collect();
 
-    assert_eq!(routing_rejection(&records)[0].severity, Severity::Medium);
+    assert_eq!(
+        routing_rejection(&records, &stats(600, 0, 0, 0))[0].severity,
+        Severity::Medium
+    );
 }
 
 #[test]
@@ -1420,10 +1423,22 @@ fn rejections_spread_across_buckets_or_routers_do_not_escalate() {
         _ => unreachable!(),
     });
 
-    let findings = routing_rejection(&records);
+    let findings = routing_rejection(&records, &stats(600, 0, 0, 0));
 
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].severity, Severity::Medium);
     assert_eq!(findings[0].affected.len(), 2);
     assert_eq!(findings[0].occurrences, 21);
+}
+
+#[test]
+fn buckets_count_from_the_capture_start_not_the_first_rejection() {
+    // Capture starts at 0; eleven rejections from t=50 s straddle the 60 s boundary (5 + 6).
+    let records: Vec<_> = (0..11)
+        .map(|n| reject_to_network(n + 1, 50 + n * 2, "10.0.0.2:47808", "10.0.0.9:47808"))
+        .collect();
+
+    let findings = routing_rejection(&records, &stats(600, 0, 0, 0));
+
+    assert_eq!(findings[0].severity, Severity::Medium);
 }

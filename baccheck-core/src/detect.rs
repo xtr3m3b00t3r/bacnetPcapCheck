@@ -31,7 +31,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(foreign_device_registration_failure(records));
     findings.extend(segmentation_misuse(records));
     findings.extend(unicast_i_am(records));
-    findings.extend(routing_rejection(records));
+    findings.extend(routing_rejection(records, stats));
     findings
 }
 
@@ -1122,15 +1122,10 @@ const REJECT_MESSAGE_TO_NETWORK: u8 = 0x03;
 
 /// Spots routers that answer with Reject-Message-To-Network. A router is the rejection's source
 /// IP:port; the decoder carries no rejected network number, so the finding names the router only.
-pub fn routing_rejection(records: &[DecodeRecord]) -> Vec<Finding> {
+pub fn routing_rejection(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding> {
     // Rejections per router: (timestamp, frame) in capture order.
     let mut rejections: BTreeMap<SocketAddr, Vec<(Duration, u64)>> = BTreeMap::new();
-    let origin = records
-        .iter()
-        .filter_map(envelope_of)
-        .map(|e| e.timestamp)
-        .min()
-        .unwrap_or_default();
+    let origin = stats.first_timestamp.unwrap_or_default();
 
     for record in records {
         if let DecodeRecord::NetworkMessage {
