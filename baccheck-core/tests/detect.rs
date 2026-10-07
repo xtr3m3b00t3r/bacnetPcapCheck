@@ -1312,3 +1312,41 @@ fn evidence_is_capped_and_devices_are_judged_separately() {
     assert_eq!(f.last_seen, Duration::from_secs(9));
     assert!(f.evidence.summary.contains("10.0.0.5:47808"));
 }
+
+#[test]
+fn a_who_is_from_another_port_or_long_ago_does_not_exempt_and_a_fresh_one_does() {
+    let flagged = |who: DecodeRecord| {
+        let records = [
+            who,
+            unicast_i_am_to(2, 500, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+        ];
+        unicast_i_am(&records).len()
+    };
+    assert_eq!(
+        flagged(who_is(1, 499, "10.0.0.9:47809", "10.0.0.5:47808")),
+        1
+    );
+    assert_eq!(
+        flagged(who_is(1, 100, "10.0.0.9:47808", "10.0.0.5:47808")),
+        1
+    );
+    assert_eq!(
+        flagged(who_is(1, 499, "10.0.0.9:47808", "10.0.0.5:47808")),
+        0
+    );
+
+    // The key reused after silence: an old Who-Is must not exempt a much later I-Am.
+    let records = [
+        who_is(1, 100, "10.0.0.9:47808", "10.0.0.5:47808"),
+        unicast_i_am_to(2, 110, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+        unicast_i_am_to(3, 900, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+    ];
+    assert_eq!(unicast_i_am(&records)[0].evidence.frames, vec![3]);
+}
+
+#[test]
+fn a_forwarded_npdu_is_not_a_unicast_i_am() {
+    let records = [forwarded_from(1, 10, "10.0.5.1:47808", "10.0.5.7:47808", 1)];
+
+    assert!(unicast_i_am(&records).is_empty());
+}

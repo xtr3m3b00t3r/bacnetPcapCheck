@@ -996,8 +996,19 @@ pub fn segmentation_misuse(records: &[DecodeRecord]) -> Vec<Finding> {
     }]
 }
 
-/// One device's I-Ams: how many it sent, and the unexempted unicast ones as (frame, time, instance).
-type SentIAms = (u64, Vec<(u64, Duration, u32)>);
+/// An unexempted unicast I-Am.
+struct UnicastIAm {
+    frame: u64,
+    at: Duration,
+    device_instance: u32,
+}
+
+/// One device's I-Ams: how many it sent, and the unexempted unicast ones.
+#[derive(Default)]
+struct SentIAms {
+    total: u64,
+    unmatched: Vec<UnicastIAm>,
+}
 
 /// Spots I-Am frames sent unicast. A unicast I-Am is correct when its destination sent a directed
 /// Who-Is to its source within [`DIRECTED_WHO_IS_WINDOW`]; every other one is reported.
@@ -1026,7 +1037,7 @@ pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
                 ..
             } => {
                 let entry = sent.entry(envelope.src).or_default();
-                entry.0 += 1;
+                entry.total += 1;
                 if is_broadcast(envelope.dst) {
                     continue;
                 }
@@ -1039,22 +1050,24 @@ pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
                         })
                     });
                 if !answered {
-                    entry
-                        .1
-                        .push((envelope.frame_no, envelope.timestamp, *device_instance));
+                    entry.unmatched.push(UnicastIAm {
+                        frame: envelope.frame_no,
+                        at: envelope.timestamp,
+                        device_instance: *device_instance,
+                    });
                 }
             }
             _ => {}
         }
     }
-    sent.retain(|_, (_, unmatched)| !unmatched.is_empty());
+    sent.retain(|_, device| !device.unmatched.is_empty());
     if sent.is_empty() {
         return Vec::new();
     }
 
-    let escalated = sent.values().any(|(total, unmatched)| {
-        *total >= UNICAST_I_AM_RATIO_MIN_I_AMS
-            && unmatched.len() as f64 / *total as f64 > UNICAST_I_AM_MEDIUM_ABOVE_SHARE
+    let escalated = sent.values().any(|device| {
+        device.total >= UNICAST_I_AM_RATIO_MIN_I_AMS
+            && device.unmatched.len() as f64 / device.total as f64 > UNICAST_I_AM_MEDIUM_ABOVE_SHARE
     });
     let severity = if escalated {
         Severity::Medium
@@ -1064,7 +1077,7 @@ pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
 
     let mut hits: Vec<(u64, Duration)> = sent
         .values()
-        .flat_map(|(_, unmatched)| unmatched.iter().map(|(frame, at, _)| (*frame, *at)))
+        .flat_map(|device| device.unmatched.iter().map(|hit| (hit.frame, hit.at)))
         .collect();
     hits.sort_by_key(|(frame, at)| (*at, *frame));
     let occurrences = hits.len() as u64;
@@ -1075,7 +1088,7 @@ pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
         .collect();
     let senders_text = sent
         .iter()
-        .map(|(addr, (_, unmatched))| format!("{addr} ({} of its I-Ams)", unmatched.len()))
+        .map(|(addr, device)| format!("{addr} ({} of its I-Ams)", device.unmatched.len()))
         .collect::<Vec<_>>()
         .join(", ");
     let summary = format!(
@@ -1089,8 +1102,8 @@ pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
         severity,
         affected: sent
             .iter()
-            .map(|(addr, (_, unmatched))| DeviceRef {
-                device_instance: Some(unmatched[0].2),
+            .map(|(addr, device)| DeviceRef {
+                device_instance: Some(device.unmatched[0].device_instance),
                 ip: addr.ip(),
                 port: Some(addr.port()),
             })
