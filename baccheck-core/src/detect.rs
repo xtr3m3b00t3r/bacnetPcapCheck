@@ -712,9 +712,12 @@ pub fn foreign_device_registration_failure(records: &[DecodeRecord]) -> Vec<Find
     for record in records {
         match record {
             DecodeRecord::RegisterForeignDevice { envelope, .. } => {
-                open.entry((envelope.src, envelope.dst))
-                    .or_default()
-                    .push((envelope.frame_no, envelope.timestamp));
+                // A request nobody NAKed in time is closed; this one starts afresh.
+                let pending = open.entry((envelope.src, envelope.dst)).or_default();
+                pending.retain(|(_, sent)| {
+                    envelope.timestamp.saturating_sub(*sent) <= REGISTRATION_NAK_WINDOW
+                });
+                pending.push((envelope.frame_no, envelope.timestamp));
             }
             DecodeRecord::BvlcResult {
                 envelope,
@@ -723,11 +726,13 @@ pub fn foreign_device_registration_failure(records: &[DecodeRecord]) -> Vec<Find
                 let Some(pending) = open.get_mut(&(envelope.dst, envelope.src)) else {
                     continue;
                 };
-                // Latest request first: the NAK most plausibly answers the newest one.
-                let matched = pending.iter().rposition(|(_, sent)| {
-                    envelope.timestamp >= *sent
-                        && envelope.timestamp - *sent <= REGISTRATION_NAK_WINDOW
+                pending.retain(|(_, sent)| {
+                    envelope.timestamp.saturating_sub(*sent) <= REGISTRATION_NAK_WINDOW
                 });
+                // Latest request first: the NAK most plausibly answers the newest one.
+                let matched = pending
+                    .iter()
+                    .rposition(|(_, sent)| envelope.timestamp >= *sent);
                 if let Some(index) = matched {
                     let (request_frame, _) = pending.remove(index);
                     failures.entry(envelope.dst).or_default().push((
@@ -754,12 +759,13 @@ pub fn foreign_device_registration_failure(records: &[DecodeRecord]) -> Vec<Find
             .base_severity
     };
     let total: u64 = failures.values().map(|f| f.len() as u64).sum();
-    let mut frames: Vec<u64> = failures
-        .values()
-        .flatten()
+    // Request/NAK pairs in time order, so a truncated sample still shows both halves of a failure.
+    let mut pairs: Vec<&(u64, u64, Duration)> = failures.values().flatten().collect();
+    pairs.sort_by_key(|(_, nak, at)| (*at, *nak));
+    let mut frames: Vec<u64> = pairs
+        .iter()
         .flat_map(|(request, nak, _)| [*request, *nak])
         .collect();
-    frames.sort_unstable();
     frames.truncate(MAX_EVIDENCE_FRAMES);
     let times = || failures.values().flatten().map(|(_, _, at)| *at);
     let registrants_text = failures

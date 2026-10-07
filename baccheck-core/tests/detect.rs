@@ -786,7 +786,8 @@ fn five_naks_for_one_registrant_stay_medium_and_six_are_high() {
     let f = &foreign_device_registration_failure(&six)[0];
     assert_eq!(f.severity, Severity::High);
     assert_eq!(f.occurrences, 6);
-    assert_eq!(f.evidence.frames.len(), 5);
+    // Pairs in time order: the sample ends on a request whose NAK was cut off.
+    assert_eq!(f.evidence.frames, vec![1, 1000, 2, 1001, 3]);
 }
 
 #[test]
@@ -875,4 +876,18 @@ fn one_request_is_answered_by_at_most_one_nak() {
         foreign_device_registration_failure(&records)[0].occurrences,
         1
     );
+}
+
+#[test]
+fn a_request_reusing_the_key_after_silence_starts_a_new_registration() {
+    let records = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        register_fd(2, 100, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(3, 101, "10.0.0.10:47808", "192.168.5.20:47808", 0x0030),
+    ];
+
+    let findings = foreign_device_registration_failure(&records);
+
+    assert_eq!(findings[0].occurrences, 1);
+    assert_eq!(findings[0].evidence.frames, vec![2, 3]);
 }
