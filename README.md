@@ -13,3 +13,9 @@ ship it in whatever you want, no strings. If it helps you, that's what it's for.
 
 This is a personal project, shared to demonstrate engineering craft; it is not a
 product or a business.
+
+## Documentation
+
+The docs site is one self-contained file, `docs/index.html`. Edit the pages in `docs/src/`, then
+run `cargo xtask docs-build`. A test fails when the committed file is stale. The xtask is dev-only;
+release builds use `cargo build --release -p baccheck-cli`.

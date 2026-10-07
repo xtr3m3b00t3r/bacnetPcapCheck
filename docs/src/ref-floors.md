@@ -1,0 +1,11 @@
+# Evidence-floor semantics
+
+An evidence floor is the least evidence a rule needs before it can raise a finding. Below the floor, the rule stays silent.
+
+- A floor is a count of relevant messages. Examples are confirmed requests sent by one device, or broadcasts sent by local hosts.
+- A rate-based rule also needs a capture of at least 5 minutes. The rule checks this before it checks anything else.
+- Rate rules count time in fixed buckets, measured from the first frame of the capture. They do not use the clock time of the capture.
+- A ratio rule needs a minimum number of judged exchanges before it reads the ratio.
+- A finding carries at most five example frames. The evidence text gives the totals.
+
+Each tuning number is one named constant in the BACcheck source. See [Why evidence floors exist](exp-floors.md) for the reason.

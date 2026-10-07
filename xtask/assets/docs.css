@@ -1,0 +1,62 @@
+:root { --page-max: 72rem; }
+body { background: var(--cds-background, #f4f4f4); color: var(--cds-text-primary, #161616); margin: 0; }
+
+.doc-header { background: #161616; color: #f4f4f4; }
+.doc-header__inner { max-width: var(--page-max); margin: 0 auto; padding: 0.875rem 1rem; display: flex; align-items: baseline; gap: 1rem; }
+.doc-header__product { font-size: 0.875rem; font-weight: 600; letter-spacing: 0.16px; }
+
+.doc-shell { max-width: var(--page-max); margin: 0 auto; display: grid; grid-template-columns: 16rem 1fr; min-height: calc(100vh - 100px); }
+
+nav.doc-nav { border-inline-end: 1px solid var(--cds-border-subtle, #e0e0e0); padding: 1rem 0; }
+.doc-nav__group-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.32px; text-transform: uppercase; color: var(--cds-text-secondary, #525252); padding: 1rem 1rem 0.375rem; }
+.doc-nav__group-label:first-child { padding-top: 0; }
+.doc-nav a.doc-nav__link { display: block; padding: 0.5rem 1rem; font-size: 0.875rem; color: var(--cds-text-primary, #161616); text-decoration: none; border-inline-start: 3px solid transparent; }
+.doc-nav a.doc-nav__link:hover { background: var(--cds-layer-hover, #e8e8e8); }
+.doc-nav a.doc-nav__link.active { border-inline-start-color: #0f62fe; background: var(--cds-layer-selected, #e0e0e0); font-weight: 600; }
+.doc-nav__tag { float: right; }
+
+main.doc-main { padding: 2rem 3rem; max-width: 48rem; }
+.doc-main h1 { font-size: 2rem; font-weight: 400; margin: 0 0 0.25rem; }
+.doc-kicker { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.32px; text-transform: uppercase; color: var(--cds-text-secondary, #525252); margin: 0 0 1rem; }
+.doc-main p, .doc-main li { font-size: 0.875rem; line-height: 1.5; }
+.doc-main h2 { font-size: 1.25rem; font-weight: 400; margin: 2rem 0 0.75rem; }
+.doc-main h3 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+.doc-main li { margin-bottom: 0.5rem; }
+.doc-main a { color: #0f62fe; }
+.doc-main code, .doc-main pre { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.8125rem; }
+.doc-main pre { background: var(--cds-layer, #fff); padding: 1rem; overflow-x: auto; }
+.doc-main table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.doc-main th, .doc-main td { text-align: left; padding: 0.375rem 0.5rem; border-bottom: 1px solid var(--cds-border-subtle, #e0e0e0); font-size: 0.8125rem; }
+
+.doc-generated { border: 1px dashed #8a3ffc; background: #f6f2ff; padding: 1rem; margin: 1rem 0; }
+.doc-generated__label { display: inline-block; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.32px; text-transform: uppercase; color: #6929c4; margin-bottom: 0.5rem; }
+.doc-generated pre { background: transparent; padding: 0; }
+
+/* Without JavaScript every page shows. With it, only the active page. */
+.js .doc-page { display: none; }
+.js .doc-page--active { display: block; }
+
+.doc-footer { background: #161616; color: #c6c6c6; margin-top: 3rem; }
+.doc-footer__inner { max-width: var(--page-max); margin: 0 auto; padding: 1rem; display: flex; align-items: baseline; gap: 0.75rem; }
+.doc-footer__app { font-size: 0.875rem; font-weight: 600; color: #f4f4f4; }
+.doc-footer__credit { margin-left: auto; font-size: 0.75rem; }
+.doc-footer__credit a { color: #78a9ff; text-decoration: none; }
+
+@media (max-width: 42rem) {
+  .doc-shell { grid-template-columns: 1fr; }
+  main.doc-main { padding: 1.5rem 1rem; }
+}
+
+/* Print: A4, the whole manual in order, no navigation. */
+@media print {
+  @page { size: A4; margin: 18mm 16mm; }
+  body { background: #fff; }
+  .doc-header, nav.doc-nav { display: none; }
+  .doc-shell { display: block; }
+  main.doc-main { padding: 0; max-width: none; }
+  .js .doc-page, .doc-page { display: block !important; break-before: page; }
+  .doc-page:first-child { break-before: auto; }
+  .doc-generated { break-inside: avoid; background: #fff; }
+  .doc-main a { color: inherit; text-decoration: none; }
+  .doc-footer { break-inside: avoid; margin-top: 1rem; }
+}

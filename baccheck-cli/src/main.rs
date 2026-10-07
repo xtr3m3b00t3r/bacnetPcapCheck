@@ -9,53 +9,11 @@ mod notice;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, ValueEnum};
+use baccheck_cli::cli::Cli;
+use clap::Parser;
 
 use baccheck_core::analyse_capture;
 use baccheck_core::report::{render_html, Severity as CoreSeverity};
-
-/// Analyse a BACnet/IP capture for common network problems.
-#[derive(Parser)]
-#[command(name = "baccheck", version)]
-struct Cli {
-    /// Path to the .pcap or .pcapng capture to analyse
-    capture: PathBuf,
-
-    /// Where to write the report: a file path, or a directory (default: alongside the capture)
-    #[arg(short, long)]
-    output: Option<PathBuf>,
-
-    /// Hide findings below this severity in the report (never affects the exit code)
-    #[arg(short = 's', long, value_enum)]
-    min_severity: Option<Severity>,
-
-    /// Print decode and parse diagnostics to stderr
-    #[arg(short, long, conflicts_with = "quiet")]
-    verbose: bool,
-
-    /// Do not print the summary line (errors still print)
-    #[arg(short, long)]
-    quiet: bool,
-}
-
-#[derive(Copy, Clone, ValueEnum)]
-enum Severity {
-    Critical,
-    High,
-    Medium,
-    Low,
-}
-
-impl From<Severity> for CoreSeverity {
-    fn from(severity: Severity) -> Self {
-        match severity {
-            Severity::Critical => CoreSeverity::Critical,
-            Severity::High => CoreSeverity::High,
-            Severity::Medium => CoreSeverity::Medium,
-            Severity::Low => CoreSeverity::Low,
-        }
-    }
-}
 
 /// `<capture-stem>.baccheck.html`, next to the capture unless `--output` says otherwise.
 fn report_path(capture: &Path, output: Option<&Path>) -> PathBuf {

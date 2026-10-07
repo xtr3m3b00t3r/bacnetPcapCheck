@@ -1,0 +1,13 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Dev-only build tasks. Never shipped in a release artifact."
+
+[dependencies]
+baccheck-cli = { path = "../baccheck-cli" }
+baccheck-core = { path = "../baccheck-core" }
+clap = { version = "4", features = ["derive"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
