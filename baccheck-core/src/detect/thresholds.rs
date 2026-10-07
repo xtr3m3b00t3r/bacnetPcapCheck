@@ -76,3 +76,16 @@ pub const REGISTRATION_NAK_WINDOW: Duration = Duration::from_secs(10);
 
 /// NAKs for one registrant above which a registration failure is High.
 pub const REGISTRATION_NAK_HIGH_ABOVE: u64 = 5;
+
+/// Silence after the last segment of a segmented exchange, with no final segment, abort or
+/// reject, after which the exchange counts as abandoned.
+pub const SEGMENT_ABANDON_AFTER: Duration = Duration::from_secs(30);
+
+/// Abandoned exchanges for one (sender, receiver) pair at which segmentation misuse is reported.
+pub const SEGMENT_ABANDONED_MIN: u64 = 3;
+
+/// Judged exchanges for one pair that must exist before the abandonment ratio is read.
+pub const SEGMENT_RATIO_MIN_EXCHANGES: u64 = 10;
+
+/// Abandoned share of a pair's judged exchanges above which segmentation misuse is High.
+pub const SEGMENT_HIGH_ABOVE_SHARE: f64 = 0.50;

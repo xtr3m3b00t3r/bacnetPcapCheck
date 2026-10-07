@@ -254,3 +254,65 @@ pub fn rejected_registrations(count: u64, registrant: &str, bbmd: &str) -> Vec<D
         })
         .collect()
 }
+
+/// A segmented ConfirmedRequest segment from `src` to `dst`.
+pub fn segment(
+    frame_no: u64,
+    secs: u64,
+    src: &str,
+    dst: &str,
+    invoke_id: u8,
+    more_follows: bool,
+) -> DecodeRecord {
+    apdu(
+        frame_no,
+        secs,
+        src,
+        dst,
+        ApduHeader::ConfirmedRequest {
+            segmented: true,
+            more_follows,
+            segmented_response_accepted: true,
+            invoke_id,
+            service_choice: 12,
+        },
+    )
+}
+
+pub fn abort(frame_no: u64, secs: u64, src: &str, dst: &str, invoke_id: u8) -> DecodeRecord {
+    apdu(
+        frame_no,
+        secs,
+        src,
+        dst,
+        ApduHeader::Abort {
+            server: true,
+            invoke_id,
+        },
+    )
+}
+
+/// `count` segmented exchanges from 10.0.0.5 to 10.0.0.9, invoke IDs 1.., 100 s apart from t=0.
+/// Each opens with two more-follows segments (frames 10n+1, 10n+2, 1 s apart). The first
+/// `completed` exchanges then close with a final segment (frame 10n+3); the rest go quiet.
+pub fn segmented_exchanges(count: u8, completed: u8) -> Vec<DecodeRecord> {
+    let mut records = Vec::new();
+    for n in 0..count {
+        let base = u64::from(n) * 100;
+        let frame = u64::from(n) * 10;
+        for (i, more) in [(0, true), (1, true), (2, false)] {
+            if i == 2 && n >= completed {
+                continue;
+            }
+            records.push(segment(
+                frame + i + 1,
+                base + i,
+                "10.0.0.5:47808",
+                "10.0.0.9:47808",
+                n + 1,
+                more,
+            ));
+        }
+    }
+    records
+}

@@ -7,7 +7,7 @@ use common::*;
 use baccheck_core::decode::DecodeRecord;
 use baccheck_core::detect::{
     broadcast_storm, duplicate_bbmd, duplicate_device_id, foreign_device_registration_failure,
-    incomplete_bdt, unresponsive_device,
+    incomplete_bdt, segmentation_misuse, unresponsive_device,
 };
 use baccheck_core::report::{IssueId, Severity};
 
@@ -890,4 +890,111 @@ fn a_request_reusing_the_key_after_silence_starts_a_new_registration() {
 
     assert_eq!(findings[0].occurrences, 1);
     assert_eq!(findings[0].evidence.frames, vec![2, 3]);
+}
+
+#[test]
+fn three_abandoned_exchanges_for_one_pair_is_a_medium_finding_naming_the_sender() {
+    let mut records = segmented_exchanges(3, 0);
+    records.push(unicast_apdu(900, 300, "10.0.0.5:47808", "10.0.0.6:47808"));
+
+    let findings = segmentation_misuse(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::SegmentationMisuse);
+    assert_eq!(f.severity, Severity::Medium);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("10.0.0.5:47808").ip());
+    assert_eq!(f.occurrences, 3);
+    assert_eq!(f.evidence.frames, vec![2, 12, 22]);
+    assert_eq!(f.first_seen, Duration::from_secs(1));
+    assert_eq!(f.last_seen, Duration::from_secs(201));
+}
+
+#[test]
+fn two_abandoned_exchanges_stay_silent() {
+    let mut records = segmented_exchanges(2, 0);
+    records.push(unicast_apdu(900, 300, "10.0.0.5:47808", "10.0.0.6:47808"));
+
+    assert!(segmentation_misuse(&records).is_empty());
+}
+
+#[test]
+fn an_exchange_open_when_the_capture_ends_is_not_judged() {
+    // The last exchange's final segment is at t=201; the capture ends 20 s later.
+    let mut records = segmented_exchanges(3, 0);
+    records.push(unicast_apdu(900, 221, "10.0.0.5:47808", "10.0.0.6:47808"));
+
+    assert!(segmentation_misuse(&records).is_empty());
+}
+
+#[test]
+fn a_majority_abandoned_of_ten_exchanges_is_high_and_five_of_nine_stay_medium() {
+    let mut high = segmented_exchanges(10, 4);
+    high.push(unicast_apdu(900, 2000, "10.0.0.5:47808", "10.0.0.6:47808"));
+    let mut medium = segmented_exchanges(9, 4);
+    medium.push(unicast_apdu(900, 2000, "10.0.0.5:47808", "10.0.0.6:47808"));
+    let mut half = segmented_exchanges(10, 5);
+    half.push(unicast_apdu(900, 2000, "10.0.0.5:47808", "10.0.0.6:47808"));
+
+    let f = &segmentation_misuse(&high)[0];
+    assert_eq!(f.severity, Severity::High);
+    assert_eq!(f.occurrences, 6);
+    // Sample capped at five of the six abandoned exchanges.
+    assert_eq!(f.evidence.frames.len(), 5);
+    assert_eq!(segmentation_misuse(&medium)[0].severity, Severity::Medium);
+    // Exactly half is not "more than half".
+    assert_eq!(segmentation_misuse(&half)[0].severity, Severity::Medium);
+}
+
+#[test]
+fn an_abort_from_the_receiver_closes_an_exchange_without_abandoning_it() {
+    let mut records = segmented_exchanges(3, 0);
+    for n in 0..3u8 {
+        records.push(abort(
+            500 + u64::from(n),
+            u64::from(n) * 100 + 5,
+            "10.0.0.9:47808",
+            "10.0.0.5:47808",
+            n + 1,
+        ));
+    }
+    records.push(unicast_apdu(900, 2000, "10.0.0.5:47808", "10.0.0.6:47808"));
+
+    assert!(segmentation_misuse(&records).is_empty());
+}
+
+#[test]
+fn a_reused_invoke_id_after_the_abandon_window_starts_a_new_exchange() {
+    // One key, three times, 100 s apart: each earlier use is abandoned, none is completed by the
+    // next use's segments.
+    let records = [
+        segment(1, 0, "10.0.0.5:47808", "10.0.0.9:47808", 7, true),
+        segment(2, 100, "10.0.0.5:47808", "10.0.0.9:47808", 7, true),
+        segment(3, 200, "10.0.0.5:47808", "10.0.0.9:47808", 7, true),
+        unicast_apdu(900, 300, "10.0.0.5:47808", "10.0.0.6:47808"),
+    ];
+
+    let f = &segmentation_misuse(&records)[0];
+
+    assert_eq!(f.occurrences, 3);
+    assert_eq!(f.evidence.frames, vec![1, 2, 3]);
+}
+
+#[test]
+fn abandoned_exchanges_split_across_pairs_do_not_add_up() {
+    let mut records = segmented_exchanges(2, 0);
+    for n in 0..2u8 {
+        records.push(segment(
+            700 + u64::from(n),
+            u64::from(n) * 100,
+            "10.0.0.5:47808",
+            "10.0.0.10:47808",
+            n + 50,
+            true,
+        ));
+    }
+    records.push(unicast_apdu(900, 2000, "10.0.0.5:47808", "10.0.0.6:47808"));
+
+    assert!(segmentation_misuse(&records).is_empty());
 }

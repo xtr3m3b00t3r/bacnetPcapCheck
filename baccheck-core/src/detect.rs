@@ -29,6 +29,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(duplicate_bbmd(records, stats));
     findings.extend(incomplete_bdt(records));
     findings.extend(foreign_device_registration_failure(records));
+    findings.extend(segmentation_misuse(records));
     findings
 }
 
@@ -794,5 +795,197 @@ pub fn foreign_device_registration_failure(records: &[DecodeRecord]) -> Vec<Find
         evidence: Evidence { summary, frames },
         first_seen: times().min().unwrap_or_default(),
         last_seen: times().max().unwrap_or_default(),
+    }]
+}
+
+/// Segment fields of an APDU that can carry segments, with its invoke ID.
+fn segment_fields(header: &ApduHeader) -> Option<(bool, bool, u8)> {
+    match header {
+        ApduHeader::ConfirmedRequest {
+            segmented,
+            more_follows,
+            invoke_id,
+            ..
+        }
+        | ApduHeader::ComplexAck {
+            segmented,
+            more_follows,
+            invoke_id,
+            ..
+        } => Some((*segmented, *more_follows, *invoke_id)),
+        _ => None,
+    }
+}
+
+/// One segmented exchange still waiting for its final segment.
+struct OpenExchange {
+    last_frame: u64,
+    last_seen: Duration,
+}
+
+/// Judged segmented exchanges of one (sender, receiver) pair.
+#[derive(Default)]
+struct PairExchanges {
+    judged: u64,
+    /// (last segment frame, last segment time) of each abandoned exchange.
+    abandoned: Vec<(u64, Duration)>,
+}
+
+pub fn segmentation_misuse(records: &[DecodeRecord]) -> Vec<Finding> {
+    type Key = (SocketAddr, SocketAddr, u8);
+    let mut open: BTreeMap<Key, OpenExchange> = BTreeMap::new();
+    let mut pairs: BTreeMap<(SocketAddr, SocketAddr), PairExchanges> = BTreeMap::new();
+
+    // Closes `key` if it is open: abandoned when it went quiet before `now`, otherwise judged
+    // complete. Returns whether an exchange was open.
+    fn close(
+        open: &mut BTreeMap<Key, OpenExchange>,
+        pairs: &mut BTreeMap<(SocketAddr, SocketAddr), PairExchanges>,
+        key: Key,
+        now: Duration,
+    ) -> bool {
+        let Some(exchange) = open.remove(&key) else {
+            return false;
+        };
+        let pair = pairs.entry((key.0, key.1)).or_default();
+        pair.judged += 1;
+        if now.saturating_sub(exchange.last_seen) > SEGMENT_ABANDON_AFTER {
+            pair.abandoned
+                .push((exchange.last_frame, exchange.last_seen));
+        }
+        true
+    }
+
+    for record in records {
+        let DecodeRecord::Apdu { envelope, header } = record else {
+            continue;
+        };
+        let now = envelope.timestamp;
+        match header {
+            ApduHeader::Abort { invoke_id, .. } | ApduHeader::Reject { invoke_id } => {
+                close(
+                    &mut open,
+                    &mut pairs,
+                    (envelope.dst, envelope.src, *invoke_id),
+                    now,
+                );
+            }
+            _ => {
+                let Some((true, more_follows, invoke_id)) = segment_fields(header) else {
+                    continue;
+                };
+                let key = (envelope.src, envelope.dst, invoke_id);
+                if more_follows {
+                    // A reused ID after the abandon window is a new exchange.
+                    let stale = open
+                        .get(&key)
+                        .is_some_and(|e| now.saturating_sub(e.last_seen) > SEGMENT_ABANDON_AFTER);
+                    if stale {
+                        close(&mut open, &mut pairs, key, now);
+                    }
+                    open.insert(
+                        key,
+                        OpenExchange {
+                            last_frame: envelope.frame_no,
+                            last_seen: now,
+                        },
+                    );
+                } else {
+                    close(&mut open, &mut pairs, key, now);
+                }
+            }
+        }
+    }
+
+    let capture_end = records
+        .iter()
+        .filter_map(envelope_of)
+        .map(|e| e.timestamp)
+        .max()
+        .unwrap_or_default();
+    // Exchanges still open at capture end are abandoned only if the capture outlasted the window.
+    let leftover: Vec<Key> = open
+        .iter()
+        .filter(|(_, e)| capture_end.saturating_sub(e.last_seen) > SEGMENT_ABANDON_AFTER)
+        .map(|(key, _)| *key)
+        .collect();
+    for key in leftover {
+        close(&mut open, &mut pairs, key, capture_end);
+    }
+
+    let mut severity = None;
+    let mut flagged: Vec<(&(SocketAddr, SocketAddr), &PairExchanges)> = Vec::new();
+    for (pair_key, pair) in &pairs {
+        let abandoned = pair.abandoned.len() as u64;
+        let high = pair.judged >= SEGMENT_RATIO_MIN_EXCHANGES
+            && abandoned as f64 / pair.judged as f64 > SEGMENT_HIGH_ABOVE_SHARE;
+        let level = if high {
+            Severity::High
+        } else if abandoned >= SEGMENT_ABANDONED_MIN {
+            IssueId::SegmentationMisuse.spec().base_severity
+        } else {
+            continue;
+        };
+        severity = severity.max(Some(level));
+        flagged.push((pair_key, pair));
+    }
+    let Some(severity) = severity else {
+        return Vec::new();
+    };
+
+    let mut affected_senders: BTreeSet<SocketAddr> = BTreeSet::new();
+    let mut abandoned: Vec<(u64, Duration)> = Vec::new();
+    for ((sender, _), pair) in &flagged {
+        affected_senders.insert(*sender);
+        abandoned.extend(&pair.abandoned);
+    }
+    abandoned.sort_by_key(|(frame, at)| (*at, *frame));
+    let pairs_text = flagged
+        .iter()
+        .map(|((sender, receiver), pair)| {
+            format!(
+                "{sender} to {receiver} ({} of {} abandoned)",
+                pair.abandoned.len(),
+                pair.judged
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let summary = format!(
+        "Segmented exchanges stopped without a final segment, abort or reject for {} s: \
+         {pairs_text}.",
+        SEGMENT_ABANDON_AFTER.as_secs()
+    );
+
+    vec![Finding {
+        issue: IssueId::SegmentationMisuse,
+        severity,
+        affected: affected_senders
+            .iter()
+            .map(|addr| DeviceRef {
+                device_instance: None,
+                ip: addr.ip(),
+                port: Some(addr.port()),
+            })
+            .collect(),
+        occurrences: abandoned.len() as u64,
+        evidence: Evidence {
+            summary,
+            frames: abandoned
+                .iter()
+                .map(|(frame, _)| *frame)
+                .take(MAX_EVIDENCE_FRAMES)
+                .collect(),
+        },
+        first_seen: abandoned
+            .iter()
+            .map(|(_, at)| *at)
+            .min()
+            .unwrap_or_default(),
+        last_seen: abandoned
+            .iter()
+            .map(|(_, at)| *at)
+            .max()
+            .unwrap_or_default(),
     }]
 }
