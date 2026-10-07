@@ -101,3 +101,12 @@ pub const UNICAST_I_AM_MEDIUM_ABOVE_SHARE: f64 = 0.50;
 
 /// Rejections from one router in one fixed bucket above which a routing rejection is High.
 pub const ROUTING_REJECTION_HIGH_ABOVE_PER_MINUTE: u64 = 10;
+
+/// Confirmed request frames a sender must have sent before its repeats are judged.
+pub const RETRANSMISSION_MIN_REQUESTS: u64 = 10;
+
+/// Repeat share of a sender's confirmed request frames above which retransmission is Medium.
+pub const RETRANSMISSION_MEDIUM_ABOVE_SHARE: f64 = 0.20;
+
+/// Repeat share of a sender's confirmed request frames above which retransmission is High.
+pub const RETRANSMISSION_HIGH_ABOVE_SHARE: f64 = 0.50;

@@ -6,8 +6,9 @@ use common::*;
 
 use baccheck_core::decode::DecodeRecord;
 use baccheck_core::detect::{
-    broadcast_storm, duplicate_bbmd, duplicate_device_id, foreign_device_registration_failure,
-    incomplete_bdt, routing_rejection, segmentation_misuse, unicast_i_am, unresponsive_device,
+    broadcast_storm, confirmed_service_retransmission, duplicate_bbmd, duplicate_device_id,
+    foreign_device_registration_failure, incomplete_bdt, routing_rejection, segmentation_misuse,
+    unicast_i_am, unresponsive_device,
 };
 use baccheck_core::report::{IssueId, Severity};
 
@@ -1441,4 +1442,122 @@ fn buckets_count_from_the_capture_start_not_the_first_rejection() {
     let findings = routing_rejection(&records, &stats(600, 0, 0, 0));
 
     assert_eq!(findings[0].severity, Severity::Medium);
+}
+
+#[test]
+fn a_sender_repeating_over_a_fifth_of_its_requests_is_a_medium_finding_naming_the_sender() {
+    // 13 request frames, 3 of them repeats: 23%.
+    let records = retransmitting_sender(10, 3, 1);
+
+    let findings = confirmed_service_retransmission(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::ConfirmedServiceRetransmission);
+    assert_eq!(f.severity, Severity::Medium);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("10.0.0.5:47808").ip());
+    assert_eq!(f.affected[0].port, Some(47808));
+    assert_eq!(f.occurrences, 3);
+    assert_eq!(f.evidence.frames, vec![2, 4, 6]);
+    assert_eq!(f.first_seen, Duration::from_secs(1));
+    assert_eq!(f.last_seen, Duration::from_secs(21));
+}
+
+#[test]
+fn a_sender_below_ten_requests_is_silent_however_much_it_repeats() {
+    // 9 frames, 2 repeats: 22%, but under the floor.
+    assert!(confirmed_service_retransmission(&retransmitting_sender(7, 2, 1)).is_empty());
+}
+
+#[test]
+fn a_repeat_share_of_exactly_a_fifth_is_silent() {
+    // 10 frames, 2 repeats.
+    assert!(confirmed_service_retransmission(&retransmitting_sender(8, 2, 1)).is_empty());
+}
+
+#[test]
+fn a_repeat_share_over_half_is_high() {
+    // 12 frames, 8 repeats: 67%.
+    let findings = confirmed_service_retransmission(&retransmitting_sender(4, 4, 2));
+
+    assert_eq!(findings[0].severity, Severity::High);
+    assert_eq!(findings[0].occurrences, 8);
+    assert_eq!(findings[0].evidence.frames.len(), 5);
+}
+
+#[test]
+fn a_repeat_share_of_exactly_half_stays_medium() {
+    // 10 frames, 5 repeats.
+    let findings = confirmed_service_retransmission(&retransmitting_sender(5, 5, 1));
+
+    assert_eq!(findings[0].severity, Severity::Medium);
+}
+
+#[test]
+fn a_request_reusing_an_invoke_id_after_the_answer_is_not_a_retransmission() {
+    let mut records = Vec::new();
+    for n in 0..5u8 {
+        let base = u64::from(n) * 10;
+        let frame = u64::from(n) * 3;
+        records.push(confirmed_request(
+            frame + 1,
+            base,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            n,
+        ));
+        records.push(simple_ack(
+            frame + 2,
+            base + 1,
+            "10.0.0.9:47808",
+            "10.0.0.5:47808",
+            n,
+        ));
+        records.push(confirmed_request(
+            frame + 3,
+            base + 5,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            n,
+        ));
+    }
+
+    assert!(confirmed_service_retransmission(&records).is_empty());
+}
+
+#[test]
+fn repeats_after_a_reject_are_new_requests_but_repeats_before_it_count() {
+    // Ten requests; invoke ID 1 is sent three times before the reject and once after it.
+    let mut records = vec![
+        confirmed_request(1, 0, "10.0.0.5:47808", "10.0.0.9:47808", 1),
+        confirmed_request(2, 1, "10.0.0.5:47808", "10.0.0.9:47808", 1),
+        confirmed_request(3, 2, "10.0.0.5:47808", "10.0.0.9:47808", 1),
+        reject(4, 3, "10.0.0.9:47808", "10.0.0.5:47808", 1),
+        confirmed_request(5, 4, "10.0.0.5:47808", "10.0.0.9:47808", 1),
+    ];
+    for n in 0..5u8 {
+        records.push(confirmed_request(
+            10 + u64::from(n),
+            10 + u64::from(n),
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            n + 2,
+        ));
+    }
+
+    let findings = confirmed_service_retransmission(&records);
+
+    // 10 frames, 2 repeats (frames 2 and 3): exactly 20%, silent.
+    assert!(findings.is_empty());
+    records.push(confirmed_request(
+        20,
+        20,
+        "10.0.0.5:47808",
+        "10.0.0.9:47808",
+        2,
+    ));
+    // 11 frames, 3 repeats: 27%.
+    let findings = confirmed_service_retransmission(&records);
+    assert_eq!(findings[0].evidence.frames, vec![2, 3, 20]);
 }

@@ -32,6 +32,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(segmentation_misuse(records));
     findings.extend(unicast_i_am(records));
     findings.extend(routing_rejection(records, stats));
+    findings.extend(confirmed_service_retransmission(records));
     findings
 }
 
@@ -1189,4 +1190,109 @@ pub fn routing_rejection(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<
         first_seen: all.first().map(|(t, _)| *t).unwrap_or_default(),
         last_seen: all.last().map(|(t, _)| *t).unwrap_or_default(),
     }]
+}
+
+/// What one sender did with its confirmed requests.
+#[derive(Default)]
+struct Sender {
+    requests_sent: u64,
+    /// (timestamp, frame) of each repeat of a request still awaiting its answer.
+    repeats: Vec<(Duration, u64)>,
+}
+
+/// Correlates confirmed requests by (sender, responder, invoke ID), the same table as
+/// [`unresponsive_device`] with the opposite attribution: repeats are the sender's fault.
+pub fn confirmed_service_retransmission(records: &[DecodeRecord]) -> Vec<Finding> {
+    let mut senders: BTreeMap<SocketAddr, Sender> = BTreeMap::new();
+    let mut open: BTreeSet<(SocketAddr, SocketAddr, u8)> = BTreeSet::new();
+    let mut instances: BTreeMap<SocketAddr, u32> = BTreeMap::new();
+
+    for record in records {
+        match record {
+            DecodeRecord::IAm {
+                envelope,
+                device_instance,
+                ..
+            } => {
+                instances.insert(envelope.src, *device_instance);
+            }
+            DecodeRecord::Apdu { envelope, header } => match header {
+                ApduHeader::ConfirmedRequest { invoke_id, .. } => {
+                    let sender = senders.entry(envelope.src).or_default();
+                    sender.requests_sent += 1;
+                    if !open.insert(confirmed_key(envelope, *invoke_id)) {
+                        sender.repeats.push((envelope.timestamp, envelope.frame_no));
+                    }
+                }
+                ApduHeader::SimpleAck { invoke_id, .. }
+                | ApduHeader::ComplexAck { invoke_id, .. }
+                | ApduHeader::Error { invoke_id, .. }
+                | ApduHeader::Reject { invoke_id }
+                | ApduHeader::Abort { invoke_id, .. } => {
+                    open.remove(&(envelope.dst, envelope.src, *invoke_id));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    senders
+        .into_iter()
+        .filter_map(|(sender, activity)| {
+            retransmission_finding(sender, instances.get(&sender).copied(), activity)
+        })
+        .collect()
+}
+
+fn retransmission_finding(
+    sender: SocketAddr,
+    device_instance: Option<u32>,
+    activity: Sender,
+) -> Option<Finding> {
+    if activity.requests_sent < RETRANSMISSION_MIN_REQUESTS {
+        return None;
+    }
+    let repeats = activity.repeats.len() as u64;
+    let share = repeats as f64 / activity.requests_sent as f64;
+    let severity = if share > RETRANSMISSION_HIGH_ABOVE_SHARE {
+        Severity::High
+    } else if share > RETRANSMISSION_MEDIUM_ABOVE_SHARE {
+        IssueId::ConfirmedServiceRetransmission.spec().base_severity
+    } else {
+        return None;
+    };
+
+    let mut frames: Vec<u64> = activity.repeats.iter().map(|(_, frame)| *frame).collect();
+    frames.truncate(MAX_EVIDENCE_FRAMES);
+    let summary = format!(
+        "{sender} repeated {repeats} of its {} confirmed requests ({:.0}%) before any answer arrived. \
+         Its APDU timeout may be too short, or the device it asks is slow to answer.",
+        activity.requests_sent,
+        share * 100.0
+    );
+
+    Some(Finding {
+        issue: IssueId::ConfirmedServiceRetransmission,
+        severity,
+        affected: vec![DeviceRef {
+            device_instance,
+            ip: sender.ip(),
+            port: Some(sender.port()),
+        }],
+        occurrences: repeats,
+        evidence: Evidence { summary, frames },
+        first_seen: activity
+            .repeats
+            .iter()
+            .map(|(t, _)| *t)
+            .min()
+            .unwrap_or_default(),
+        last_seen: activity
+            .repeats
+            .iter()
+            .map(|(t, _)| *t)
+            .max()
+            .unwrap_or_default(),
+    })
 }

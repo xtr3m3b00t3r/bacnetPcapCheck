@@ -382,3 +382,29 @@ pub fn network_message(
 pub fn reject_to_network(frame_no: u64, secs: u64, router: &str, sender: &str) -> DecodeRecord {
     network_message(frame_no, secs, router, sender, 0x03)
 }
+
+/// Confirmed requests from 10.0.0.5 to 10.0.0.9, one per invoke ID 1..=`exchanges`, 10 s apart,
+/// never answered. The first `repeated_exchanges` are each sent `repeats` more times, 1 s apart.
+/// Frames are numbered in capture order from 1.
+pub fn retransmitting_sender(
+    exchanges: u8,
+    repeated_exchanges: u8,
+    repeats: u8,
+) -> Vec<DecodeRecord> {
+    let mut records = Vec::new();
+    let mut frame_no = 0;
+    for n in 0..exchanges {
+        let extra = if n < repeated_exchanges { repeats } else { 0 };
+        for send in 0..=extra {
+            frame_no += 1;
+            records.push(confirmed_request(
+                frame_no,
+                u64::from(n) * 10 + u64::from(send),
+                "10.0.0.5:47808",
+                "10.0.0.9:47808",
+                n + 1,
+            ));
+        }
+    }
+    records
+}
