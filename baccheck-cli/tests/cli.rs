@@ -9,7 +9,15 @@ use bacnet_rs::object::{ObjectIdentifier, ObjectType, Segmentation};
 use bacnet_rs::service::{IAmRequest, UnconfirmedServiceChoice};
 use pcap_file::pcap::{PcapPacket, PcapWriter};
 
+/// Records the first-run notice as seen, the way a previous run would.
+fn acknowledge_notice(config: &Path) {
+    let state = config.join("baccheck").join("state.toml");
+    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    std::fs::write(state, "acknowledged_notice = 1\n").unwrap();
+}
+
 /// Runs the binary with its per-user config directory under `config`.
+/// `directories` reads `XDG_CONFIG_HOME` on Linux and falls back to `$HOME/.config`, so both are set.
 fn baccheck_with_config(config: &Path, args: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_baccheck"))
         .args(args)
@@ -22,9 +30,7 @@ fn baccheck_with_config(config: &Path, args: &[&std::ffi::OsStr]) -> Output {
 /// Runs the binary with a shared config directory, so the first-run notice is not what is under test.
 fn baccheck(args: &[&std::ffi::OsStr]) -> Output {
     let config = Path::new(env!("CARGO_TARGET_TMPDIR")).join("shared-config");
-    let state = config.join("baccheck").join("state.toml");
-    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
-    std::fs::write(&state, "acknowledged_notice = 1\n").unwrap();
+    acknowledge_notice(&config);
     baccheck_with_config(&config, args)
 }
 
@@ -329,4 +335,48 @@ fn first_run_notice_does_not_block_when_the_state_file_cannot_be_written() {
 
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     assert!(String::from_utf8_lossy(&out.stderr).contains("MIT licence"));
+}
+
+#[test]
+fn quiet_still_prints_the_capture_health_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join("noise.pcap");
+    let mut buf = Vec::new();
+    {
+        let mut writer = PcapWriter::new(&mut buf).unwrap();
+        let junk = [0u8; 20];
+        let packet = PcapPacket::new(Duration::from_secs(1_700_000_000), 20, &junk);
+        writer.write_packet(&packet).unwrap();
+    }
+    std::fs::write(&capture, buf).unwrap();
+
+    let out = baccheck(&[capture.as_os_str(), "-q".as_ref()]);
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Warning."));
+}
+
+/// The binary makes no network calls. This guards the dependency list, not the call sites.
+#[test]
+fn the_lock_file_holds_no_network_client_crates() {
+    let lock =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.lock")).unwrap();
+    for crate_name in [
+        "reqwest",
+        "hyper",
+        "ureq",
+        "curl",
+        "isahc",
+        "surf",
+        "openssl",
+        "rustls",
+        "native-tls",
+        "tokio",
+    ] {
+        assert!(
+            !lock.contains(&format!("name = \"{crate_name}\"")),
+            "{crate_name} is a network crate"
+        );
+    }
 }
