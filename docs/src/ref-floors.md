@@ -8,4 +8,16 @@ An evidence floor is the least evidence a rule needs before it can raise a findi
 - A ratio rule needs a minimum number of judged exchanges before it reads the ratio.
 - A finding carries at most five example frames. The evidence text gives the totals.
 
+## Floors in use
+
+| Rule | Floor |
+| --- | --- |
+| Rate-based rules | A capture of at least 5 minutes. |
+| Broadcast saturation | At least 200 decoded BACnet messages. |
+| Unresponsive device | At least 10 confirmed requests received by the device. |
+| Incomplete BDT | At least 50 broadcasts sent by local hosts. |
+| Segmentation misuse | At least 3 abandoned exchanges for one pair. The ratio needs 10 judged exchanges. |
+| Unicast I-Am | At least 10 I-Ams sent by the device. |
+| Confirmed-service retransmission | At least 10 confirmed request frames sent by the sender. |
+
 Each tuning number is one named constant in the BACcheck source. See [Why evidence floors exist](exp-floors.md) for the reason.

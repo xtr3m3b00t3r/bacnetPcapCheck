@@ -346,6 +346,16 @@ Options:
 <li>A ratio rule needs a minimum number of judged exchanges before it reads the ratio.</li>
 <li>A finding carries at most five example frames. The evidence text gives the totals.</li>
 </ul>
+<h2>Floors in use</h2>
+<table><thead><tr><th>Rule</th><th>Floor</th></tr></thead><tbody>
+<tr><td>Rate-based rules</td><td>A capture of at least 5 minutes.</td></tr>
+<tr><td>Broadcast saturation</td><td>At least 200 decoded BACnet messages.</td></tr>
+<tr><td>Unresponsive device</td><td>At least 10 confirmed requests received by the device.</td></tr>
+<tr><td>Incomplete BDT</td><td>At least 50 broadcasts sent by local hosts.</td></tr>
+<tr><td>Segmentation misuse</td><td>At least 3 abandoned exchanges for one pair. The ratio needs 10 judged exchanges.</td></tr>
+<tr><td>Unicast I-Am</td><td>At least 10 I-Ams sent by the device.</td></tr>
+<tr><td>Confirmed-service retransmission</td><td>At least 10 confirmed request frames sent by the sender.</td></tr>
+</tbody></table>
 <p>Each tuning number is one named constant in the BACcheck source. See <a href="#exp-floors">Why evidence floors exist</a> for the reason.</p>
 </article>
 <article class="doc-page" id="page-exp-detectors">
@@ -383,7 +393,7 @@ Options:
 <script>
 (function () {
   var root = document.documentElement;
-  var first = document.querySelector('.doc-page').id.slice(5);
+  var first = document.querySelector('.doc-page').id.replace('page-', '');
   function show() {
     var slug = location.hash.slice(1) || first;
     if (!document.getElementById('page-' + slug)) { slug = first; }
