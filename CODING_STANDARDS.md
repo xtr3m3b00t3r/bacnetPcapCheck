@@ -13,6 +13,7 @@ Judgement calls only. Formatting, lints and tests are enforced by `.githooks/pre
 
 ## Tests
 
+- The decode seam (`tests/decode.rs`) and the detector seam below are the agreed seams for `tdd`; no need to ask.
 - Test detectors at the `fn(&[DecodeRecord], …) -> Vec<Finding>` seam with synthetic records. Build them from `tests/common/mod.rs`; add a builder there when a second test file wants it.
 - Per detector: one fixture that fires, one below the evidence floor that stays silent, and the severity-escalation case.
 - Correlating detectors get a reused-key-after-silence case.
