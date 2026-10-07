@@ -30,6 +30,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(incomplete_bdt(records));
     findings.extend(foreign_device_registration_failure(records));
     findings.extend(segmentation_misuse(records));
+    findings.extend(unicast_i_am(records));
     findings
 }
 
@@ -992,5 +993,111 @@ pub fn segmentation_misuse(records: &[DecodeRecord]) -> Vec<Finding> {
             .map(|(_, at)| *at)
             .max()
             .unwrap_or_default(),
+    }]
+}
+
+/// One device's I-Ams: how many it sent, and the unexempted unicast ones as (frame, time, instance).
+type SentIAms = (u64, Vec<(u64, Duration, u32)>);
+
+/// Spots I-Am frames sent unicast. A unicast I-Am is correct when its destination sent a directed
+/// Who-Is to its source within [`DIRECTED_WHO_IS_WINDOW`]; every other one is reported.
+pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
+    let broadcasts = broadcast_destinations(records);
+    let is_broadcast = |addr: SocketAddr| match addr.ip() {
+        IpAddr::V4(ip) => ip == Ipv4Addr::BROADCAST || broadcasts.contains(&ip),
+        IpAddr::V6(_) => false,
+    };
+
+    // Directed Who-Is times keyed (asker, asked).
+    let mut asks: BTreeMap<(SocketAddr, SocketAddr), Vec<Duration>> = BTreeMap::new();
+    // Per I-Am sender: every I-Am sent, and the unexempted unicast ones as (frame, time, instance).
+    let mut sent: BTreeMap<SocketAddr, SentIAms> = BTreeMap::new();
+
+    for record in records {
+        match record {
+            DecodeRecord::WhoIs { envelope, .. } if !is_broadcast(envelope.dst) => {
+                asks.entry((envelope.src, envelope.dst))
+                    .or_default()
+                    .push(envelope.timestamp);
+            }
+            DecodeRecord::IAm {
+                envelope,
+                device_instance,
+                ..
+            } => {
+                let entry = sent.entry(envelope.src).or_default();
+                entry.0 += 1;
+                if is_broadcast(envelope.dst) {
+                    continue;
+                }
+                let answered = asks
+                    .get(&(envelope.dst, envelope.src))
+                    .is_some_and(|times| {
+                        times.iter().any(|asked| {
+                            *asked <= envelope.timestamp
+                                && envelope.timestamp - *asked <= DIRECTED_WHO_IS_WINDOW
+                        })
+                    });
+                if !answered {
+                    entry
+                        .1
+                        .push((envelope.frame_no, envelope.timestamp, *device_instance));
+                }
+            }
+            _ => {}
+        }
+    }
+    sent.retain(|_, (_, unmatched)| !unmatched.is_empty());
+    if sent.is_empty() {
+        return Vec::new();
+    }
+
+    let escalated = sent.values().any(|(total, unmatched)| {
+        *total >= UNICAST_I_AM_RATIO_MIN_I_AMS
+            && unmatched.len() as f64 / *total as f64 > UNICAST_I_AM_MEDIUM_ABOVE_SHARE
+    });
+    let severity = if escalated {
+        Severity::Medium
+    } else {
+        IssueId::UnicastIAm.spec().base_severity
+    };
+
+    let mut hits: Vec<(u64, Duration)> = sent
+        .values()
+        .flat_map(|(_, unmatched)| unmatched.iter().map(|(frame, at, _)| (*frame, *at)))
+        .collect();
+    hits.sort_by_key(|(frame, at)| (*at, *frame));
+    let occurrences = hits.len() as u64;
+    let frames: Vec<u64> = hits
+        .iter()
+        .map(|(frame, _)| *frame)
+        .take(MAX_EVIDENCE_FRAMES)
+        .collect();
+    let senders_text = sent
+        .iter()
+        .map(|(addr, (_, unmatched))| format!("{addr} ({} of its I-Ams)", unmatched.len()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let summary = format!(
+        "{occurrences} I-Am(s) were sent unicast with no directed Who-Is from the recipient in the \
+         preceding {} s: {senders_text}.",
+        DIRECTED_WHO_IS_WINDOW.as_secs()
+    );
+
+    vec![Finding {
+        issue: IssueId::UnicastIAm,
+        severity,
+        affected: sent
+            .iter()
+            .map(|(addr, (_, unmatched))| DeviceRef {
+                device_instance: Some(unmatched[0].2),
+                ip: addr.ip(),
+                port: Some(addr.port()),
+            })
+            .collect(),
+        occurrences,
+        evidence: Evidence { summary, frames },
+        first_seen: hits.first().map(|(_, at)| *at).unwrap_or_default(),
+        last_seen: hits.last().map(|(_, at)| *at).unwrap_or_default(),
     }]
 }

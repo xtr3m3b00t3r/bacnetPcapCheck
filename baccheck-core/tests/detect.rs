@@ -7,7 +7,7 @@ use common::*;
 use baccheck_core::decode::DecodeRecord;
 use baccheck_core::detect::{
     broadcast_storm, duplicate_bbmd, duplicate_device_id, foreign_device_registration_failure,
-    incomplete_bdt, segmentation_misuse, unresponsive_device,
+    incomplete_bdt, segmentation_misuse, unicast_i_am, unresponsive_device,
 };
 use baccheck_core::report::{IssueId, Severity};
 
@@ -1134,4 +1134,181 @@ fn the_worst_pair_sets_the_severity() {
 
     assert_eq!(f.severity, Severity::High);
     assert_eq!(f.affected.len(), 2);
+}
+
+/// An I-Am from `src` to the unicast address `dst`.
+fn unicast_i_am_to(frame_no: u64, secs: u64, src: &str, dst: &str, instance: u32) -> DecodeRecord {
+    let mut record = i_am(frame_no, secs, src, instance);
+    if let DecodeRecord::IAm { envelope, .. } = &mut record {
+        envelope.dst = addr(dst);
+    }
+    record
+}
+
+#[test]
+fn an_unsolicited_unicast_i_am_is_a_low_finding_naming_the_sender() {
+    let records = [unicast_i_am_to(
+        7,
+        50,
+        "10.0.0.5:47808",
+        "10.0.0.9:47808",
+        101,
+    )];
+
+    let findings = unicast_i_am(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::UnicastIAm);
+    assert_eq!(f.severity, Severity::Low);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("10.0.0.5:47808").ip());
+    assert_eq!(f.affected[0].device_instance, Some(101));
+    assert_eq!(f.occurrences, 1);
+    assert_eq!(f.evidence.frames, vec![7]);
+    assert_eq!(f.first_seen, Duration::from_secs(50));
+    assert_eq!(f.last_seen, Duration::from_secs(50));
+}
+
+#[test]
+fn a_broadcast_i_am_is_silent() {
+    let records = [
+        i_am(1, 10, "10.0.0.5:47808", 101),
+        unicast_i_am_to(2, 20, "10.0.0.5:47808", "255.255.255.255:47808", 101),
+    ];
+
+    assert!(unicast_i_am(&records).is_empty());
+}
+
+#[test]
+fn a_unicast_i_am_answering_a_directed_who_is_within_sixty_seconds_is_silent() {
+    let records = [
+        who_is(1, 100, "10.0.0.9:47808", "10.0.0.5:47808"),
+        unicast_i_am_to(2, 160, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+    ];
+
+    assert!(unicast_i_am(&records).is_empty());
+}
+
+#[test]
+fn a_who_is_that_does_not_exempt_leaves_the_i_am_flagged() {
+    // Too old, broadcast, from another host, aimed at another device, or sent after the I-Am.
+    let cases = [
+        who_is(1, 100, "10.0.0.9:47808", "10.0.0.5:47808"), // 61 s before
+        who_is(1, 130, "10.0.0.9:47808", "10.0.0.255:47808"),
+        who_is(1, 130, "10.0.0.8:47808", "10.0.0.5:47808"),
+        who_is(1, 130, "10.0.0.9:47808", "10.0.0.6:47808"),
+        who_is(1, 162, "10.0.0.9:47808", "10.0.0.5:47808"),
+    ];
+    for who in cases {
+        let records = [
+            i_am(9, 10, "10.0.0.5:47808", 101),
+            who,
+            unicast_i_am_to(2, 161, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+        ];
+        // Frame 9 is a broadcast I-Am; only frame 2 is unicast.
+        let findings = unicast_i_am(&records);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].evidence.frames, vec![2]);
+    }
+}
+
+#[test]
+fn one_directed_who_is_exempts_every_i_am_in_its_window() {
+    let records = [
+        who_is(1, 100, "10.0.0.9:47808", "10.0.0.5:47808"),
+        unicast_i_am_to(2, 110, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+        unicast_i_am_to(3, 120, "10.0.0.5:47808", "10.0.0.9:47808", 101),
+    ];
+
+    assert!(unicast_i_am(&records).is_empty());
+}
+
+#[test]
+fn a_directed_broadcast_destination_is_a_broadcast_not_a_unicast() {
+    // 10.0.0.255 is in a /24 the capture has sources in.
+    let records = [unicast_i_am_to(
+        1,
+        10,
+        "10.0.0.5:47808",
+        "10.0.0.255:47808",
+        101,
+    )];
+
+    assert!(unicast_i_am(&records).is_empty());
+}
+
+#[test]
+fn more_than_half_of_ten_i_ams_unmatched_is_medium_and_exactly_half_stays_low() {
+    let build = |unmatched: u64| {
+        let mut records = Vec::new();
+        for n in 0..10u64 {
+            records.push(if n < unmatched {
+                unicast_i_am_to(n + 1, n * 5, "10.0.0.5:47808", "10.0.0.9:47808", 101)
+            } else {
+                i_am(n + 1, n * 5, "10.0.0.5:47808", 101)
+            });
+        }
+        records
+    };
+
+    assert_eq!(unicast_i_am(&build(6))[0].severity, Severity::Medium);
+    assert_eq!(unicast_i_am(&build(5))[0].severity, Severity::Low);
+}
+
+#[test]
+fn fewer_than_ten_i_ams_never_escalate_and_exempted_ones_count_as_matched() {
+    let few: Vec<_> = (0..9u64)
+        .map(|n| unicast_i_am_to(n + 1, n, "10.0.0.5:47808", "10.0.0.9:47808", 101))
+        .collect();
+    assert_eq!(unicast_i_am(&few)[0].severity, Severity::Low);
+
+    // 12 I-Ams, 5 unmatched, 7 exempted by a directed Who-Is: 5/12 is under half.
+    let mut records = vec![who_is(100, 1000, "10.0.0.9:47808", "10.0.0.5:47808")];
+    for n in 0..7u64 {
+        records.push(unicast_i_am_to(
+            n + 1,
+            1000 + n,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            101,
+        ));
+    }
+    for n in 0..5u64 {
+        records.push(unicast_i_am_to(
+            n + 20,
+            2000 + n,
+            "10.0.0.5:47808",
+            "10.0.0.9:47808",
+            101,
+        ));
+    }
+    let f = &unicast_i_am(&records)[0];
+    assert_eq!(f.severity, Severity::Low);
+    assert_eq!(f.occurrences, 5);
+}
+
+#[test]
+fn evidence_is_capped_and_devices_are_judged_separately() {
+    let mut records: Vec<_> = (0..8u64)
+        .map(|n| unicast_i_am_to(n + 1, n, "10.0.0.5:47808", "10.0.0.9:47808", 101))
+        .collect();
+    records.push(unicast_i_am_to(
+        50,
+        9,
+        "10.0.0.6:47808",
+        "10.0.0.9:47808",
+        102,
+    ));
+
+    let findings = unicast_i_am(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.occurrences, 9);
+    assert_eq!(f.affected.len(), 2);
+    assert_eq!(f.evidence.frames, vec![1, 2, 3, 4, 5]);
+    assert_eq!(f.first_seen, Duration::from_secs(0));
+    assert_eq!(f.last_seen, Duration::from_secs(9));
+    assert!(f.evidence.summary.contains("10.0.0.5:47808"));
 }

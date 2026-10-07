@@ -89,3 +89,12 @@ pub const SEGMENT_RATIO_MIN_EXCHANGES: u64 = 10;
 
 /// Abandoned share of a pair's judged exchanges above which segmentation misuse is High.
 pub const SEGMENT_HIGH_ABOVE_SHARE: f64 = 0.50;
+
+/// How long before a unicast I-Am a directed Who-Is from its recipient still makes it a correct reply.
+pub const DIRECTED_WHO_IS_WINDOW: Duration = Duration::from_secs(60);
+
+/// I-Ams one device must have sent before the unmatched share is read.
+pub const UNICAST_I_AM_RATIO_MIN_I_AMS: u64 = 10;
+
+/// Unmatched unicast share of a device's I-Ams above which unicast I-Am is Medium.
+pub const UNICAST_I_AM_MEDIUM_ABOVE_SHARE: f64 = 0.50;
