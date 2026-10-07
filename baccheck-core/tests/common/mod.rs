@@ -316,3 +316,45 @@ pub fn segmented_exchanges(count: u8, completed: u8) -> Vec<DecodeRecord> {
     }
     records
 }
+
+pub fn segment_ack(frame_no: u64, secs: u64, src: &str, dst: &str, invoke_id: u8) -> DecodeRecord {
+    apdu(
+        frame_no,
+        secs,
+        src,
+        dst,
+        ApduHeader::SegmentAck {
+            negative: false,
+            server: true,
+            invoke_id,
+        },
+    )
+}
+
+/// A segmented ComplexAck segment from `src` to `dst`.
+pub fn ack_segment(
+    frame_no: u64,
+    secs: u64,
+    src: &str,
+    dst: &str,
+    invoke_id: u8,
+    more_follows: bool,
+) -> DecodeRecord {
+    apdu(
+        frame_no,
+        secs,
+        src,
+        dst,
+        ApduHeader::ComplexAck {
+            segmented: true,
+            more_follows,
+            invoke_id,
+            service_choice: 12,
+        },
+    )
+}
+
+/// A closing record for the capture clock: a unicast message at `secs`.
+pub fn capture_ends_at(secs: u64) -> DecodeRecord {
+    unicast_apdu(900, secs, "10.0.0.5:47808", "10.0.0.6:47808")
+}

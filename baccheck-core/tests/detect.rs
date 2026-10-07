@@ -998,3 +998,140 @@ fn abandoned_exchanges_split_across_pairs_do_not_add_up() {
 
     assert!(segmentation_misuse(&records).is_empty());
 }
+
+#[test]
+fn a_reject_from_the_receiver_closes_an_exchange_but_a_segment_ack_does_not() {
+    let rejected = [
+        segment(1, 0, "10.0.0.5:47808", "10.0.0.9:47808", 3, true),
+        reject(2, 5, "10.0.0.9:47808", "10.0.0.5:47808", 3),
+    ];
+    let acked = [
+        segment(1, 0, "10.0.0.5:47808", "10.0.0.9:47808", 3, true),
+        segment_ack(2, 5, "10.0.0.9:47808", "10.0.0.5:47808", 3),
+    ];
+    let judge = |records: &[DecodeRecord]| {
+        // Three copies of the exchange on distinct IDs, then the capture clock runs on.
+        let mut all = Vec::new();
+        for id in 0..3u8 {
+            for record in records {
+                all.push(match record.clone() {
+                    DecodeRecord::Apdu { envelope, header } => DecodeRecord::Apdu {
+                        envelope,
+                        header: with_invoke_id(header, id + 1),
+                    },
+                    other => other,
+                });
+            }
+        }
+        all.push(capture_ends_at(2000));
+        segmentation_misuse(&all)
+    };
+
+    assert!(judge(&rejected).is_empty());
+    assert_eq!(judge(&acked).len(), 1);
+}
+
+fn with_invoke_id(
+    header: baccheck_core::decode::ApduHeader,
+    id: u8,
+) -> baccheck_core::decode::ApduHeader {
+    use baccheck_core::decode::ApduHeader as H;
+    match header {
+        H::ConfirmedRequest {
+            segmented,
+            more_follows,
+            segmented_response_accepted,
+            service_choice,
+            ..
+        } => H::ConfirmedRequest {
+            segmented,
+            more_follows,
+            segmented_response_accepted,
+            invoke_id: id,
+            service_choice,
+        },
+        H::SegmentAck {
+            negative, server, ..
+        } => H::SegmentAck {
+            negative,
+            server,
+            invoke_id: id,
+        },
+        H::Reject { .. } => H::Reject { invoke_id: id },
+        other => other,
+    }
+}
+
+#[test]
+fn complex_ack_segments_are_their_own_exchange_naming_the_responder() {
+    let mut records: Vec<DecodeRecord> = (0..3u8)
+        .map(|n| {
+            ack_segment(
+                u64::from(n) + 1,
+                u64::from(n) * 100,
+                "10.0.0.9:47808",
+                "10.0.0.5:47808",
+                n + 1,
+                true,
+            )
+        })
+        .collect();
+    records.push(capture_ends_at(2000));
+
+    let f = &segmentation_misuse(&records)[0];
+
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("10.0.0.9:47808").ip());
+}
+
+#[test]
+fn a_final_segment_after_the_abandon_window_still_counts_as_abandoned() {
+    let records: Vec<DecodeRecord> = (0..3u8)
+        .flat_map(|n| {
+            let base = u64::from(n) * 100;
+            let frame = u64::from(n) * 10;
+            [
+                segment(
+                    frame + 1,
+                    base,
+                    "10.0.0.5:47808",
+                    "10.0.0.9:47808",
+                    n + 1,
+                    true,
+                ),
+                segment(
+                    frame + 2,
+                    base + 31,
+                    "10.0.0.5:47808",
+                    "10.0.0.9:47808",
+                    n + 1,
+                    false,
+                ),
+            ]
+        })
+        .collect();
+
+    assert_eq!(segmentation_misuse(&records)[0].occurrences, 3);
+}
+
+#[test]
+fn the_worst_pair_sets_the_severity() {
+    // 10.0.0.5 -> .9: 6 of 10 abandoned (High). 10.0.0.7 -> .9: 3 abandoned (Medium).
+    let mut records = segmented_exchanges(10, 4);
+    for n in 0..3u8 {
+        records.push(segment(
+            700 + u64::from(n),
+            u64::from(n) * 100,
+            "10.0.0.7:47808",
+            "10.0.0.9:47808",
+            n + 50,
+            true,
+        ));
+    }
+    records.push(capture_ends_at(2000));
+
+    let f = &segmentation_misuse(&records)[0];
+
+    assert_eq!(f.severity, Severity::High);
+    assert_eq!(f.affected.len(), 2);
+}

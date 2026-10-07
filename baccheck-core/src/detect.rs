@@ -823,6 +823,13 @@ struct OpenExchange {
     last_seen: Duration,
 }
 
+impl OpenExchange {
+    /// Whether more than the abandon window has passed since the last segment, at `now`.
+    fn is_quiet_at(&self, now: Duration) -> bool {
+        now.saturating_sub(self.last_seen) > SEGMENT_ABANDON_AFTER
+    }
+}
+
 /// Judged segmented exchanges of one (sender, receiver) pair.
 #[derive(Default)]
 struct PairExchanges {
@@ -849,7 +856,7 @@ pub fn segmentation_misuse(records: &[DecodeRecord]) -> Vec<Finding> {
         };
         let pair = pairs.entry((key.0, key.1)).or_default();
         pair.judged += 1;
-        if now.saturating_sub(exchange.last_seen) > SEGMENT_ABANDON_AFTER {
+        if exchange.is_quiet_at(now) {
             pair.abandoned
                 .push((exchange.last_frame, exchange.last_seen));
         }
@@ -877,9 +884,7 @@ pub fn segmentation_misuse(records: &[DecodeRecord]) -> Vec<Finding> {
                 let key = (envelope.src, envelope.dst, invoke_id);
                 if more_follows {
                     // A reused ID after the abandon window is a new exchange.
-                    let stale = open
-                        .get(&key)
-                        .is_some_and(|e| now.saturating_sub(e.last_seen) > SEGMENT_ABANDON_AFTER);
+                    let stale = open.get(&key).is_some_and(|e| e.is_quiet_at(now));
                     if stale {
                         close(&mut open, &mut pairs, key, now);
                     }
@@ -906,7 +911,7 @@ pub fn segmentation_misuse(records: &[DecodeRecord]) -> Vec<Finding> {
     // Exchanges still open at capture end are abandoned only if the capture outlasted the window.
     let leftover: Vec<Key> = open
         .iter()
-        .filter(|(_, e)| capture_end.saturating_sub(e.last_seen) > SEGMENT_ABANDON_AFTER)
+        .filter(|(_, e)| e.is_quiet_at(capture_end))
         .map(|(key, _)| *key)
         .collect();
     for key in leftover {
