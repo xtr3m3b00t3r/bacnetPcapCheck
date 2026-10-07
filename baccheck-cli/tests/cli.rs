@@ -9,11 +9,23 @@ use bacnet_rs::object::{ObjectIdentifier, ObjectType, Segmentation};
 use bacnet_rs::service::{IAmRequest, UnconfirmedServiceChoice};
 use pcap_file::pcap::{PcapPacket, PcapWriter};
 
-fn baccheck(args: &[&std::ffi::OsStr]) -> Output {
+/// Runs the binary with its per-user config directory under `config`.
+fn baccheck_with_config(config: &Path, args: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_baccheck"))
         .args(args)
+        .env("XDG_CONFIG_HOME", config)
+        .env("HOME", config)
         .output()
         .expect("run baccheck")
+}
+
+/// Runs the binary with a shared config directory, so the first-run notice is not what is under test.
+fn baccheck(args: &[&std::ffi::OsStr]) -> Output {
+    let config = Path::new(env!("CARGO_TARGET_TMPDIR")).join("shared-config");
+    let state = config.join("baccheck").join("state.toml");
+    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    std::fs::write(&state, "acknowledged_notice = 1\n").unwrap();
+    baccheck_with_config(&config, args)
 }
 
 fn i_am_payload(instance: u32) -> Vec<u8> {
@@ -223,4 +235,98 @@ fn min_severity_filters_the_report_but_not_the_exit_code() {
         "the High finding is hidden from the detail list"
     );
     assert!(report.contains("1 lower finding(s) are hidden"));
+}
+
+#[test]
+fn verbose_prints_diagnostics_to_stderr_and_keeps_the_summary_on_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = duplicate_id_capture(dir.path());
+
+    let out = baccheck(&[capture.as_os_str(), "-v".as_ref()]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stderr.contains("3 frame(s) read. 3 decoded."), "{stderr}");
+    assert!(!stdout.contains("frame(s) read"), "{stdout}");
+    assert!(stdout.contains("1 finding."), "{stdout}");
+}
+
+#[test]
+fn quiet_suppresses_the_summary_line_but_not_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = duplicate_id_capture(dir.path());
+
+    let out = baccheck(&[capture.as_os_str(), "-q".as_ref()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty(), "{out:?}");
+    assert!(dir.path().join("dup.baccheck.html").exists());
+
+    let missing = baccheck(&[dir.path().join("missing.pcap").as_os_str(), "-q".as_ref()]);
+    assert_eq!(missing.status.code(), Some(3));
+    assert!(!missing.stderr.is_empty());
+}
+
+#[test]
+fn verbose_and_quiet_conflict() {
+    let out = baccheck(&[
+        Path::new("x.pcap").as_os_str(),
+        "-v".as_ref(),
+        "-q".as_ref(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn first_run_notice_prints_once_to_stderr_and_records_acknowledgement() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    let capture = clean_capture(dir.path());
+
+    let first = baccheck_with_config(&config, &[capture.as_os_str()]);
+    let stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(stderr.contains("MIT licence"), "{stderr}");
+    assert!(stderr.contains("not a commercial product"), "{stderr}");
+    assert_eq!(first.status.code(), Some(0));
+    let state = std::fs::read_to_string(config.join("baccheck").join("state.toml")).unwrap();
+    assert!(state.contains("acknowledged_notice = 1"), "{state}");
+
+    let second = baccheck_with_config(&config, &[capture.as_os_str()]);
+    assert!(
+        !String::from_utf8_lossy(&second.stderr).contains("MIT licence"),
+        "{second:?}"
+    );
+}
+
+#[test]
+fn first_run_notice_is_suppressed_by_a_pre_populated_state_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    std::fs::create_dir_all(config.join("baccheck")).unwrap();
+    std::fs::write(
+        config.join("baccheck").join("state.toml"),
+        "acknowledged_notice = 1\n",
+    )
+    .unwrap();
+    let capture = clean_capture(dir.path());
+
+    let out = baccheck_with_config(&config, &[capture.as_os_str()]);
+
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("MIT licence"),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn first_run_notice_does_not_block_when_the_state_file_cannot_be_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = clean_capture(dir.path());
+    // A file where the config directory should be.
+    let config = dir.path().join("config-is-a-file");
+    std::fs::write(&config, "x").unwrap();
+
+    let out = baccheck_with_config(&config, &[capture.as_os_str()]);
+
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("MIT licence"));
 }

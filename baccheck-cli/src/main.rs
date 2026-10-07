@@ -2,7 +2,9 @@
 //!
 //! Exit codes: `0` no findings, `1` findings present (any severity, whatever `--min-severity`
 //! says), `2` usage error (clap), `3` input error, `4` internal failure (also: report not written).
-//! Still inert: the first-run notice, and `--verbose` beyond the frame counts.
+//! `--verbose` prints diagnostics to stderr. `--quiet` drops the summary line; errors still print.
+
+mod notice;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,11 +29,11 @@ struct Cli {
     #[arg(short = 's', long, value_enum)]
     min_severity: Option<Severity>,
 
-    /// Print extra detail while running
-    #[arg(short, long)]
+    /// Print decode and parse diagnostics to stderr
+    #[arg(short, long, conflicts_with = "quiet")]
     verbose: bool,
 
-    /// Print nothing but the final summary line
+    /// Do not print the summary line (errors still print)
     #[arg(short, long)]
     quiet: bool,
 }
@@ -73,6 +75,7 @@ fn report_path(capture: &Path, output: Option<&Path>) -> PathBuf {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    notice::show_first_run_notice();
 
     let report = match analyse_capture(&cli.capture) {
         Ok(report) => report,
@@ -94,7 +97,7 @@ fn main() -> ExitCode {
 
     let stats = &report.stats;
     if cli.verbose {
-        println!(
+        eprintln!(
             "{} frame(s) read. {} decoded. {} undecoded. {} not BACnet.",
             stats.total_frames,
             stats.decoded_frames,
@@ -102,15 +105,17 @@ fn main() -> ExitCode {
             stats.non_bacnet_frames
         );
     }
-    if report.capture_health_warning && !cli.quiet {
+    if report.capture_health_warning {
         eprintln!("Warning. More than half of the capture is not decodable BACnet. Read the report with care.");
     }
     let count = report.findings.len();
-    println!(
-        "Baccheck found {count} {}. The report is at {}.",
-        if count == 1 { "finding" } else { "findings" },
-        path.display()
-    );
+    if !cli.quiet {
+        println!(
+            "Baccheck found {count} {}. The report is at {}.",
+            if count == 1 { "finding" } else { "findings" },
+            path.display()
+        );
+    }
 
     ExitCode::from(if count == 0 { 0 } else { 1 })
 }

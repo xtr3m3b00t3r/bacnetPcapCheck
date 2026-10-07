@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 baccheck-core = { path = "../baccheck-core" }
 clap = { version = "4", features = ["derive"] }
+directories = "6.0.0"
 
 [dev-dependencies]
 bacnet-rs = { version = "=0.3.1", default-features = false, features = ["std"] }
