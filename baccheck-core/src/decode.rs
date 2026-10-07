@@ -12,12 +12,13 @@
 //! - Non-BACnet traffic (wrong port, non-BVLC payload) decodes to `None` — skipped from the
 //!   decode stream, counted separately by the caller.
 //!
+//! - Register-Foreign-Device (BVLC function 0x05) is hand-decoded to its time-to-live.
 //! - Forwarded-NPDU (BVLC function 0x04) decodes to its embedded original source and a hash of the
 //!   original source plus NPDU bytes, so a detector can recognise one broadcast seen twice.
 //!
 //! Scope note: BVLC functions other than Original-Unicast-NPDU, Original-Broadcast-NPDU,
-//! Forwarded-NPDU and BVLC-Result (e.g. foreign-device/BDT management) become `Undecoded` for now.
-//! The foreign-device and BDT detectors can extend this seam when they need them.
+//! Forwarded-NPDU, BVLC-Result and Register-Foreign-Device (e.g. BDT management) become
+//! `Undecoded` for now. Detectors can extend this seam when they need them.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -104,6 +105,11 @@ pub enum DecodeRecord {
         envelope: Envelope,
         result_code: u16,
     },
+    /// A foreign device asking a BBMD to register it; `envelope.src` is the registrant.
+    RegisterForeignDevice {
+        envelope: Envelope,
+        ttl_seconds: u16,
+    },
     /// A BBMD relaying a broadcast; `envelope.src` is the forwarding BBMD.
     ForwardedNpdu {
         envelope: Envelope,
@@ -155,6 +161,11 @@ pub fn decode_packet(packet: &RawPacket) -> Option<DecodeRecord> {
         return Some(decode_bvlc_result(envelope, &packet.payload));
     }
 
+    // Likewise Register-Foreign-Device (function 0x05).
+    if packet.payload.get(1) == Some(&0x05) {
+        return Some(decode_register_foreign_device(envelope, &packet.payload));
+    }
+
     let header = match BvlcHeader::decode(&packet.payload) {
         Ok(header) => header,
         Err(e) => {
@@ -188,6 +199,20 @@ fn decode_bvlc_result(envelope: Envelope, payload: &[u8]) -> DecodeRecord {
         None => DecodeRecord::Undecoded {
             envelope,
             reason: "BVLC-Result: truncated before result code".to_string(),
+        },
+    }
+}
+
+/// Register-Foreign-Device: 4-byte BVLC header followed by a 2-byte time-to-live in seconds.
+fn decode_register_foreign_device(envelope: Envelope, payload: &[u8]) -> DecodeRecord {
+    match payload.get(4..6) {
+        Some(bytes) => DecodeRecord::RegisterForeignDevice {
+            envelope,
+            ttl_seconds: u16::from_be_bytes([bytes[0], bytes[1]]),
+        },
+        None => DecodeRecord::Undecoded {
+            envelope,
+            reason: "Register-Foreign-Device: truncated before time-to-live".to_string(),
         },
     }
 }

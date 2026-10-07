@@ -209,3 +209,48 @@ pub fn local_broadcasts(count: u64) -> Vec<DecodeRecord> {
         .map(|n| who_is(n + 1, n, "10.0.0.5:47808", "10.0.0.255:47808"))
         .collect()
 }
+
+/// A Register-Foreign-Device request from `registrant` to the BBMD `bbmd`.
+pub fn register_fd(frame_no: u64, secs: u64, registrant: &str, bbmd: &str) -> DecodeRecord {
+    DecodeRecord::RegisterForeignDevice {
+        envelope: Envelope {
+            frame_no,
+            timestamp: Duration::from_secs(secs),
+            src: addr(registrant),
+            dst: addr(bbmd),
+        },
+        ttl_seconds: 60,
+    }
+}
+
+/// A BVLC-Result with `result_code` from `bbmd` back to `registrant`.
+pub fn bvlc_result(
+    frame_no: u64,
+    secs: u64,
+    bbmd: &str,
+    registrant: &str,
+    result_code: u16,
+) -> DecodeRecord {
+    DecodeRecord::BvlcResult {
+        envelope: Envelope {
+            frame_no,
+            timestamp: Duration::from_secs(secs),
+            src: addr(bbmd),
+            dst: addr(registrant),
+        },
+        result_code,
+    }
+}
+
+/// `count` Register-Foreign-Device requests from `registrant` to `bbmd`, each NAKed (0x0030) one
+/// second later; request frames 1.., NAK frames 1000.., a pair every 20 s.
+pub fn rejected_registrations(count: u64, registrant: &str, bbmd: &str) -> Vec<DecodeRecord> {
+    (0..count)
+        .flat_map(|n| {
+            [
+                register_fd(n + 1, n * 20, registrant, bbmd),
+                bvlc_result(1000 + n, n * 20 + 1, bbmd, registrant, 0x0030),
+            ]
+        })
+        .collect()
+}

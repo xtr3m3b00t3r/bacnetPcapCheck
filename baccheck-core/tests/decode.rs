@@ -232,6 +232,43 @@ fn hand_decodes_bvlc_result() {
 }
 
 #[test]
+fn hand_decodes_register_foreign_device() {
+    let src = addr("192.168.5.20:47808");
+    let dst = addr("10.0.0.10:47808");
+
+    // 0x81, function 0x05 (Register-Foreign-Device), length 0x0006, time-to-live 0x003C (60 s).
+    let payload = vec![0x81, 0x05, 0x00, 0x06, 0x00, 0x3C];
+    let packet = raw_packet(5, src, dst, payload);
+
+    let record = decode_packet(&packet).expect("decodes as BACnet traffic");
+
+    assert_eq!(
+        record,
+        DecodeRecord::RegisterForeignDevice {
+            envelope: Envelope {
+                frame_no: 5,
+                timestamp: packet.timestamp,
+                src,
+                dst,
+            },
+            ttl_seconds: 60,
+        }
+    );
+}
+
+#[test]
+fn truncated_register_foreign_device_is_undecoded_not_a_panic() {
+    let src = addr("192.168.5.20:47808");
+    let dst = addr("10.0.0.10:47808");
+
+    let packet = raw_packet(6, src, dst, vec![0x81, 0x05, 0x00, 0x05, 0x00]);
+
+    let record = decode_packet(&packet).expect("decodes as BACnet traffic");
+
+    assert!(matches!(record, DecodeRecord::Undecoded { .. }));
+}
+
+#[test]
 fn truncated_bvlc_result_is_undecoded_not_a_panic() {
     let src = addr("10.0.0.5:47808");
     let dst = addr("10.0.0.10:47808");

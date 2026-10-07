@@ -70,3 +70,9 @@ pub const FORWARD_LOOP_CRITICAL_PER_BUCKET: u64 = 20;
 /// Broadcasts sent by local hosts that must be seen before their never being relayed back is
 /// read as a missing BDT entry. A message-count floor only: the rule is not a rate rule.
 pub const INCOMPLETE_BDT_MIN_LOCAL_BROADCASTS: u64 = 50;
+
+/// Time a BBMD has to NAK a registration, measured from the Register-Foreign-Device request.
+pub const REGISTRATION_NAK_WINDOW: Duration = Duration::from_secs(10);
+
+/// NAKs for one registrant above which a registration failure is High.
+pub const REGISTRATION_NAK_HIGH_ABOVE: u64 = 5;

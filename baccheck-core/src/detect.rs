@@ -18,6 +18,9 @@ use thresholds::*;
 /// The device instance number that means "any device". It is not a real device.
 pub const WILDCARD_DEVICE_INSTANCE: u32 = 4_194_303;
 
+/// BVLC-Result code for Register-Foreign-Device-NAK.
+const REGISTER_FOREIGN_DEVICE_NAK: u16 = 0x0030;
+
 /// Runs every detector that exists over the decode stream.
 pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding> {
     let mut findings = duplicate_device_id(records);
@@ -25,6 +28,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(unresponsive_device(records));
     findings.extend(duplicate_bbmd(records, stats));
     findings.extend(incomplete_bdt(records));
+    findings.extend(foreign_device_registration_failure(records));
     findings
 }
 
@@ -156,6 +160,7 @@ fn envelope_of(record: &DecodeRecord) -> Option<&crate::decode::Envelope> {
         DecodeRecord::WhoIs { envelope, .. }
         | DecodeRecord::IAm { envelope, .. }
         | DecodeRecord::BvlcResult { envelope, .. }
+        | DecodeRecord::RegisterForeignDevice { envelope, .. }
         | DecodeRecord::ForwardedNpdu { envelope, .. }
         | DecodeRecord::NetworkMessage { envelope, .. }
         | DecodeRecord::Apdu { envelope, .. } => Some(envelope),
@@ -692,5 +697,96 @@ pub fn incomplete_bdt(records: &[DecodeRecord]) -> Vec<Finding> {
             .map(|e| e.timestamp)
             .max()
             .unwrap_or_default(),
+    }]
+}
+
+/// Spots Register-Foreign-Device requests that the BBMD NAKed within [`REGISTRATION_NAK_WINDOW`].
+/// The NAK must come back from the BBMD the request went to, addressed to the registrant; each NAK
+/// answers one request.
+pub fn foreign_device_registration_failure(records: &[DecodeRecord]) -> Vec<Finding> {
+    // Requests per (registrant, BBMD) still waiting for an answer: (frame, timestamp).
+    let mut open: BTreeMap<(SocketAddr, SocketAddr), Vec<(u64, Duration)>> = BTreeMap::new();
+    // NAKed registrations per registrant: (request frame, NAK frame, NAK time).
+    let mut failures: BTreeMap<SocketAddr, Vec<(u64, u64, Duration)>> = BTreeMap::new();
+
+    for record in records {
+        match record {
+            DecodeRecord::RegisterForeignDevice { envelope, .. } => {
+                open.entry((envelope.src, envelope.dst))
+                    .or_default()
+                    .push((envelope.frame_no, envelope.timestamp));
+            }
+            DecodeRecord::BvlcResult {
+                envelope,
+                result_code: REGISTER_FOREIGN_DEVICE_NAK,
+            } => {
+                let Some(pending) = open.get_mut(&(envelope.dst, envelope.src)) else {
+                    continue;
+                };
+                // Latest request first: the NAK most plausibly answers the newest one.
+                let matched = pending.iter().rposition(|(_, sent)| {
+                    envelope.timestamp >= *sent
+                        && envelope.timestamp - *sent <= REGISTRATION_NAK_WINDOW
+                });
+                if let Some(index) = matched {
+                    let (request_frame, _) = pending.remove(index);
+                    failures.entry(envelope.dst).or_default().push((
+                        request_frame,
+                        envelope.frame_no,
+                        envelope.timestamp,
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if failures.is_empty() {
+        return Vec::new();
+    }
+
+    let worst = failures.values().map(Vec::len).max().unwrap_or(0) as u64;
+    let severity = if worst > REGISTRATION_NAK_HIGH_ABOVE {
+        Severity::High
+    } else {
+        IssueId::ForeignDeviceRegistrationFailure
+            .spec()
+            .base_severity
+    };
+    let total: u64 = failures.values().map(|f| f.len() as u64).sum();
+    let mut frames: Vec<u64> = failures
+        .values()
+        .flatten()
+        .flat_map(|(request, nak, _)| [*request, *nak])
+        .collect();
+    frames.sort_unstable();
+    frames.truncate(MAX_EVIDENCE_FRAMES);
+    let times = || failures.values().flatten().map(|(_, _, at)| *at);
+    let registrants_text = failures
+        .iter()
+        .map(|(addr, naks)| format!("{addr} ({} NAK(s))", naks.len()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let summary = format!(
+        "{total} Register-Foreign-Device request(s) were NAKed by the BBMD within {} s: \
+         {registrants_text}.",
+        REGISTRATION_NAK_WINDOW.as_secs()
+    );
+
+    vec![Finding {
+        issue: IssueId::ForeignDeviceRegistrationFailure,
+        severity,
+        affected: failures
+            .keys()
+            .map(|addr| DeviceRef {
+                device_instance: None,
+                ip: addr.ip(),
+                port: Some(addr.port()),
+            })
+            .collect(),
+        occurrences: total,
+        evidence: Evidence { summary, frames },
+        first_seen: times().min().unwrap_or_default(),
+        last_seen: times().max().unwrap_or_default(),
     }]
 }

@@ -6,7 +6,8 @@ use common::*;
 
 use baccheck_core::decode::DecodeRecord;
 use baccheck_core::detect::{
-    broadcast_storm, duplicate_bbmd, duplicate_device_id, incomplete_bdt, unresponsive_device,
+    broadcast_storm, duplicate_bbmd, duplicate_device_id, foreign_device_registration_failure,
+    incomplete_bdt, unresponsive_device,
 };
 use baccheck_core::report::{IssueId, Severity};
 
@@ -753,4 +754,125 @@ fn incomplete_bdt_ignores_a_unicast_forwarded_npdu() {
     records.push(unicast);
 
     assert!(incomplete_bdt(&records).is_empty());
+}
+
+#[test]
+fn a_nak_answering_a_registration_is_a_medium_finding_naming_the_registrant() {
+    let records = rejected_registrations(1, "192.168.5.20:47808", "10.0.0.10:47808");
+
+    let findings = foreign_device_registration_failure(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::ForeignDeviceRegistrationFailure);
+    assert_eq!(f.severity, Severity::Medium);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("192.168.5.20:47808").ip());
+    assert_eq!(f.occurrences, 1);
+    assert_eq!(f.evidence.frames, vec![1, 1000]);
+    assert_eq!(f.first_seen, Duration::from_secs(1));
+    assert_eq!(f.last_seen, Duration::from_secs(1));
+}
+
+#[test]
+fn five_naks_for_one_registrant_stay_medium_and_six_are_high() {
+    let five = rejected_registrations(5, "192.168.5.20:47808", "10.0.0.10:47808");
+    let six = rejected_registrations(6, "192.168.5.20:47808", "10.0.0.10:47808");
+
+    assert_eq!(
+        foreign_device_registration_failure(&five)[0].severity,
+        Severity::Medium
+    );
+    let f = &foreign_device_registration_failure(&six)[0];
+    assert_eq!(f.severity, Severity::High);
+    assert_eq!(f.occurrences, 6);
+    assert_eq!(f.evidence.frames.len(), 5);
+}
+
+#[test]
+fn naks_spread_across_registrants_do_not_add_up_to_high() {
+    let mut records = rejected_registrations(3, "192.168.5.20:47808", "10.0.0.10:47808");
+    records.extend(rejected_registrations(
+        3,
+        "192.168.5.21:47808",
+        "10.0.0.10:47808",
+    ));
+
+    let findings = foreign_device_registration_failure(&records);
+
+    assert_eq!(findings[0].severity, Severity::Medium);
+    assert_eq!(findings[0].affected.len(), 2);
+    assert_eq!(findings[0].occurrences, 6);
+}
+
+#[test]
+fn a_nak_more_than_ten_seconds_after_the_request_is_not_a_failure() {
+    let records = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(2, 11, "10.0.0.10:47808", "192.168.5.20:47808", 0x0030),
+    ];
+
+    assert!(foreign_device_registration_failure(&records).is_empty());
+}
+
+#[test]
+fn a_nak_exactly_ten_seconds_after_the_request_counts() {
+    let records = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(2, 10, "10.0.0.10:47808", "192.168.5.20:47808", 0x0030),
+    ];
+
+    assert_eq!(foreign_device_registration_failure(&records).len(), 1);
+}
+
+#[test]
+fn a_successful_registration_is_silent() {
+    let records = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(2, 1, "10.0.0.10:47808", "192.168.5.20:47808", 0x0000),
+    ];
+
+    assert!(foreign_device_registration_failure(&records).is_empty());
+}
+
+#[test]
+fn other_nak_codes_are_not_registration_failures() {
+    let records = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(2, 1, "10.0.0.10:47808", "192.168.5.20:47808", 0x0010),
+    ];
+
+    assert!(foreign_device_registration_failure(&records).is_empty());
+}
+
+#[test]
+fn a_nak_with_no_matching_request_or_from_another_bbmd_is_silent() {
+    let unrequested = [bvlc_result(
+        1,
+        1,
+        "10.0.0.10:47808",
+        "192.168.5.20:47808",
+        0x0030,
+    )];
+    let wrong_bbmd = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(2, 1, "10.0.0.11:47808", "192.168.5.20:47808", 0x0030),
+    ];
+
+    assert!(foreign_device_registration_failure(&unrequested).is_empty());
+    assert!(foreign_device_registration_failure(&wrong_bbmd).is_empty());
+}
+
+#[test]
+fn one_request_is_answered_by_at_most_one_nak() {
+    let records = [
+        register_fd(1, 0, "192.168.5.20:47808", "10.0.0.10:47808"),
+        bvlc_result(2, 1, "10.0.0.10:47808", "192.168.5.20:47808", 0x0030),
+        bvlc_result(3, 2, "10.0.0.10:47808", "192.168.5.20:47808", 0x0030),
+    ];
+
+    assert_eq!(
+        foreign_device_registration_failure(&records)[0].occurrences,
+        1
+    );
 }
