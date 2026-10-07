@@ -98,3 +98,6 @@ pub const UNICAST_I_AM_RATIO_MIN_I_AMS: u64 = 10;
 
 /// Unmatched unicast share of a device's I-Ams above which unicast I-Am is Medium.
 pub const UNICAST_I_AM_MEDIUM_ABOVE_SHARE: f64 = 0.50;
+
+/// Rejections from one router in one fixed bucket above which a routing rejection is High.
+pub const ROUTING_REJECTION_HIGH_ABOVE_PER_MINUTE: u64 = 10;

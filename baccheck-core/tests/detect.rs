@@ -7,7 +7,7 @@ use common::*;
 use baccheck_core::decode::DecodeRecord;
 use baccheck_core::detect::{
     broadcast_storm, duplicate_bbmd, duplicate_device_id, foreign_device_registration_failure,
-    incomplete_bdt, segmentation_misuse, unicast_i_am, unresponsive_device,
+    incomplete_bdt, routing_rejection, segmentation_misuse, unicast_i_am, unresponsive_device,
 };
 use baccheck_core::report::{IssueId, Severity};
 
@@ -1349,4 +1349,81 @@ fn a_forwarded_npdu_is_not_a_unicast_i_am() {
     let records = [forwarded_from(1, 10, "10.0.5.1:47808", "10.0.5.7:47808", 1)];
 
     assert!(unicast_i_am(&records).is_empty());
+}
+
+#[test]
+fn a_single_reject_message_is_a_medium_finding_naming_the_router() {
+    let records = [reject_to_network(4, 30, "10.0.0.2:47808", "10.0.0.9:47808")];
+
+    let findings = routing_rejection(&records);
+
+    assert_eq!(findings.len(), 1);
+    let f = &findings[0];
+    assert_eq!(f.issue, IssueId::RoutingRejection);
+    assert_eq!(f.severity, Severity::Medium);
+    assert_eq!(f.affected.len(), 1);
+    assert_eq!(f.affected[0].ip, addr("10.0.0.2:47808").ip());
+    assert_eq!(f.affected[0].port, Some(47808));
+    assert_eq!(f.occurrences, 1);
+    assert_eq!(f.evidence.frames, vec![4]);
+    assert_eq!(f.first_seen, Duration::from_secs(30));
+    assert_eq!(f.last_seen, Duration::from_secs(30));
+}
+
+#[test]
+fn other_network_messages_are_silent() {
+    // Who-Is-Router, I-Am-Router, Router-Busy (0x04), Router-Available, and the proprietary 0x80/0x81.
+    let records: Vec<_> = [0x00, 0x01, 0x04, 0x05, 0x80, 0x81]
+        .into_iter()
+        .enumerate()
+        .map(|(n, kind)| {
+            network_message(n as u64, n as u64, "10.0.0.2:47808", "10.0.0.9:47808", kind)
+        })
+        .collect();
+
+    assert!(routing_rejection(&records).is_empty());
+}
+
+#[test]
+fn more_than_ten_rejections_in_one_bucket_from_one_router_is_high() {
+    let records: Vec<_> = (0..11)
+        .map(|n| reject_to_network(n + 1, n * 5, "10.0.0.2:47808", "10.0.0.9:47808"))
+        .collect();
+
+    let findings = routing_rejection(&records);
+
+    assert_eq!(findings[0].severity, Severity::High);
+    assert_eq!(findings[0].occurrences, 11);
+    assert_eq!(findings[0].evidence.frames.len(), 5);
+}
+
+#[test]
+fn ten_rejections_in_one_bucket_stay_medium() {
+    let records: Vec<_> = (0..10)
+        .map(|n| reject_to_network(n + 1, n * 5, "10.0.0.2:47808", "10.0.0.9:47808"))
+        .collect();
+
+    assert_eq!(routing_rejection(&records)[0].severity, Severity::Medium);
+}
+
+#[test]
+fn rejections_spread_across_buckets_or_routers_do_not_escalate() {
+    // Eleven in total from one router, but never more than ten in a bucket.
+    let mut records: Vec<_> = (0..11)
+        .map(|n| reject_to_network(n + 1, n * 12, "10.0.0.2:47808", "10.0.0.9:47808"))
+        .collect();
+    // Ten more from a second router inside the first router's busiest minute: neither exceeds ten.
+    records
+        .extend((0..10).map(|n| reject_to_network(100 + n, n, "10.0.0.3:47808", "10.0.0.9:47808")));
+    records.sort_by_key(|r| match r {
+        DecodeRecord::NetworkMessage { envelope, .. } => envelope.timestamp,
+        _ => unreachable!(),
+    });
+
+    let findings = routing_rejection(&records);
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::Medium);
+    assert_eq!(findings[0].affected.len(), 2);
+    assert_eq!(findings[0].occurrences, 21);
 }

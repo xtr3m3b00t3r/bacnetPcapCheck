@@ -358,3 +358,27 @@ pub fn ack_segment(
 pub fn capture_ends_at(secs: u64) -> DecodeRecord {
     unicast_apdu(900, secs, "10.0.0.5:47808", "10.0.0.6:47808")
 }
+
+/// A network-layer message of `message_type` from `src` to `dst`.
+pub fn network_message(
+    frame_no: u64,
+    secs: u64,
+    src: &str,
+    dst: &str,
+    message_type: u8,
+) -> DecodeRecord {
+    DecodeRecord::NetworkMessage {
+        envelope: Envelope {
+            frame_no,
+            timestamp: Duration::from_secs(secs),
+            src: addr(src),
+            dst: addr(dst),
+        },
+        message_type,
+    }
+}
+
+/// A Reject-Message-To-Network (0x03) from `router` to `sender`.
+pub fn reject_to_network(frame_no: u64, secs: u64, router: &str, sender: &str) -> DecodeRecord {
+    network_message(frame_no, secs, router, sender, 0x03)
+}

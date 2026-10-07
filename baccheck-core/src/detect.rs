@@ -31,6 +31,7 @@ pub fn detect_all(records: &[DecodeRecord], stats: &CaptureStats) -> Vec<Finding
     findings.extend(foreign_device_registration_failure(records));
     findings.extend(segmentation_misuse(records));
     findings.extend(unicast_i_am(records));
+    findings.extend(routing_rejection(records));
     findings
 }
 
@@ -1112,5 +1113,85 @@ pub fn unicast_i_am(records: &[DecodeRecord]) -> Vec<Finding> {
         evidence: Evidence { summary, frames },
         first_seen: hits.first().map(|(_, at)| *at).unwrap_or_default(),
         last_seen: hits.last().map(|(_, at)| *at).unwrap_or_default(),
+    }]
+}
+
+/// NPDU network message type for Reject-Message-To-Network. Router-Busy-To-Network (0x04) is
+/// context, not a rejection.
+const REJECT_MESSAGE_TO_NETWORK: u8 = 0x03;
+
+/// Spots routers that answer with Reject-Message-To-Network. A router is the rejection's source
+/// IP:port; the decoder carries no rejected network number, so the finding names the router only.
+pub fn routing_rejection(records: &[DecodeRecord]) -> Vec<Finding> {
+    // Rejections per router: (timestamp, frame) in capture order.
+    let mut rejections: BTreeMap<SocketAddr, Vec<(Duration, u64)>> = BTreeMap::new();
+    let origin = records
+        .iter()
+        .filter_map(envelope_of)
+        .map(|e| e.timestamp)
+        .min()
+        .unwrap_or_default();
+
+    for record in records {
+        if let DecodeRecord::NetworkMessage {
+            envelope,
+            message_type: REJECT_MESSAGE_TO_NETWORK,
+        } = record
+        {
+            rejections
+                .entry(envelope.src)
+                .or_default()
+                .push((envelope.timestamp, envelope.frame_no));
+        }
+    }
+
+    if rejections.is_empty() {
+        return Vec::new();
+    }
+
+    let peak = rejections
+        .values()
+        .filter_map(|events| peak_bucket(events, origin))
+        .map(|(_, count, _)| count)
+        .max()
+        .unwrap_or(0);
+    let severity = if peak > ROUTING_REJECTION_HIGH_ABOVE_PER_MINUTE {
+        Severity::High
+    } else {
+        IssueId::RoutingRejection.spec().base_severity
+    };
+
+    let total: u64 = rejections.values().map(|e| e.len() as u64).sum();
+    let mut all: Vec<(Duration, u64)> = rejections.values().flatten().copied().collect();
+    all.sort();
+    let mut frames: Vec<u64> = all.iter().map(|(_, frame)| *frame).collect();
+    frames.truncate(MAX_EVIDENCE_FRAMES);
+    let routers_text = rejections
+        .iter()
+        .map(|(addr, events)| format!("{addr} ({} rejection(s))", events.len()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let summary = format!(
+        "{total} Reject-Message-To-Network message(s) from {} router(s): {routers_text}. \
+         Busiest router: {peak} in one {} s bucket.",
+        rejections.len(),
+        RATE_BUCKET.as_secs()
+    );
+
+    vec![Finding {
+        issue: IssueId::RoutingRejection,
+        severity,
+        affected: rejections
+            .keys()
+            .map(|addr| DeviceRef {
+                device_instance: None,
+                ip: addr.ip(),
+                port: Some(addr.port()),
+            })
+            .collect(),
+        occurrences: total,
+        evidence: Evidence { summary, frames },
+        first_seen: all.first().map(|(t, _)| *t).unwrap_or_default(),
+        last_seen: all.last().map(|(t, _)| *t).unwrap_or_default(),
     }]
 }
