@@ -74,6 +74,38 @@ fn site_is_self_contained() {
 }
 
 #[test]
+fn site_loads_no_external_resources_and_has_no_root_relative_links() {
+    let html = build_site(docs_src()).expect("site builds");
+    // Root-relative URLs break under the /bacnetPcapCheck/ GitHub Pages subpath.
+    for forbidden in ["href=\"/", "src=\"/", "srcset=\"/", "href='/", "src='/"] {
+        assert!(
+            !html.contains(forbidden),
+            "found root-relative URL ({forbidden})"
+        );
+    }
+    // Resource loads from another origin. Hyperlinks (<a href="https://…") are fine; the
+    // footer's LinkedIn link is one. Analytics and tracking elements are covered above too:
+    // they all load from another origin.
+    for forbidden in [
+        "<script src=",
+        "<link ",
+        "<img ",
+        "<iframe",
+        "<embed",
+        "<object",
+        "@import",
+        "url(http",
+        "src='http",
+        "src=\"http",
+    ] {
+        assert!(
+            !html.contains(forbidden),
+            "found external resource ({forbidden})"
+        );
+    }
+}
+
+#[test]
 fn generated_markers_are_all_replaced() {
     let html = build_site(docs_src()).expect("site builds");
     assert!(!html.contains("GENERATED:"));

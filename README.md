@@ -16,6 +16,7 @@ product or a business.
 
 ## Documentation
 
-The docs site is one self-contained file, `docs/index.html`. Edit the pages in `docs/src/`, then
-run `cargo xtask docs-build`. A test fails when the committed file is stale. The xtask is dev-only;
-release builds use `cargo build --release -p baccheck-cli`.
+The manual is live at https://xtr3m3b00t3r.github.io/bacnetPcapCheck/ — served from the `docs`
+folder, so it also opens offline as one self-contained file, `docs/index.html`. Edit the pages in
+`docs/src/`, then run `cargo xtask docs-build`. A test fails when the committed file is stale. The
+xtask is dev-only; release builds use `cargo build --release -p baccheck-cli`.
