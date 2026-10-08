@@ -48,6 +48,84 @@ fn issue_fragment_lists_every_issue_with_its_remediation() {
     }
 }
 
+/// Visible text of a built page: styles, scripts and markup stripped, whitespace collapsed.
+fn seen_text(html: &str) -> String {
+    let mut text = html.to_string();
+    for tag in ["style", "script"] {
+        let (open, close) = (format!("<{tag}"), format!("</{tag}>"));
+        while let Some(start) = text.find(&open) {
+            let close_at = text[start..]
+                .find(&close)
+                .expect("style/script block never closes");
+            let end = start + close_at + close.len();
+            text.replace_range(start..end, " ");
+        }
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = 0usize;
+    for c in text.chars() {
+        match c {
+            '<' => in_tag += 1,
+            '>' => in_tag = in_tag.saturating_sub(1),
+            _ if in_tag == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Loss-of-space bug signature: a letter, sentence punctuation, a capital and a letter,
+/// all with no whitespace around the punctuation (as produced by string literals joined
+/// across escaped newlines). "e.g." with a lowercase letter after the dot, and camel
+/// case without punctuation, do not match.
+fn lost_space(text: &str) -> Option<usize> {
+    let cs: Vec<char> = text.chars().collect();
+    for (i, w) in cs.windows(4).enumerate() {
+        let (a, p, b, c) = (w[0], w[1], w[2], w[3]);
+        if a.is_ascii_lowercase()
+            && ";,.".contains(p)
+            && b.is_ascii_uppercase()
+            && c.is_ascii_lowercase()
+        {
+            return text.char_indices().nth(i).map(|(byte, _)| byte);
+        }
+    }
+    None
+}
+
+/// Glyphs that legitimately appear in the prose, beyond ASCII. Kept explicit and tiny:
+/// a stray non-ASCII fragment in prose is corruption, these are deliberate typography.
+fn is_allowed_glyph(c: char) -> bool {
+    matches!(c, '·' | '–' | '—')
+}
+
+#[test]
+fn visible_text_is_clean() {
+    // The staleness guard compares built output to itself, so a glitch baked into the
+    // builder reproduces itself faithfully. Guard the built text itself, on every page:
+    // no stray non-ASCII glyph beyond the documented allowlist, and no lost whitespace
+    // after sentence punctuation. Both failed once in real output (a stray CJK fragment
+    // in a doc comment and "business.Benjamin"), which is what this test catches.
+    let pages = [landing(), manual()];
+    for html in &pages {
+        let text = seen_text(html);
+        for c in text.chars() {
+            assert!(
+                c.is_ascii() || is_allowed_glyph(c),
+                "stray non-ASCII glyph {c:?} in built page text"
+            );
+        }
+        if let Some(pos) = lost_space(&text) {
+            let from = text[..pos].rfind(' ').unwrap_or(0);
+            let to = pos + 12;
+            panic!(
+                "lost whitespace after punctuation in built page text: …{}…",
+                &text[from..to.min(text.len())]
+            );
+        }
+    }
+}
+
 fn docs_src() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/src"))
 }
