@@ -16,7 +16,8 @@ product or a business.
 
 ## Documentation
 
-The manual is live at https://xtr3m3b00t3r.github.io/bacnetPcapCheck/ — served from the `docs`
-folder, so it also opens offline as one self-contained file, `docs/index.html`. Edit the pages in
-`docs/src/`, then run `cargo xtask docs-build`. A test fails when the committed file is stale. The
-xtask is dev-only; release builds use `cargo build --release -p baccheck-cli`.
+The site is live at https://xtr3m3b00t3r.github.io/bacnetPcapCheck/, served from the `docs` folder.
+Its root `docs/index.html` is the landing page; the manual is a separate self-contained file,
+`docs/manual.html`, that also opens offline. Edit the pages in `docs/src/` and the landing page in
+`xtask/src/docs.rs`, then run `cargo xtask docs-build`. A test fails when a committed file is
+stale. The xtask is dev-only; release builds use `cargo build --release -p baccheck-cli`.

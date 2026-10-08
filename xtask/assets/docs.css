@@ -42,6 +42,17 @@ main.doc-main { padding: 2rem 3rem; max-width: 48rem; }
 .doc-footer__credit { margin-left: auto; font-size: 0.75rem; }
 .doc-footer__credit a { color: #78a9ff; text-decoration: none; }
 
+/* Landing page (site root, index.html): one screen, narrow-width readable. */
+.landing-main { max-width: 48rem; margin: 0 auto; padding: 2rem 1.25rem; }
+.landing-main h1 { font-size: 2rem; font-weight: 400; margin: 0 0 0.75rem; }
+.landing-main h2 { font-size: 1.25rem; font-weight: 400; margin: 2rem 0 0.5rem; }
+.landing-lead { font-size: 1.125rem; line-height: 1.5; margin: 0 0 1.5rem; }
+.landing-main p { font-size: 0.875rem; line-height: 1.5; }
+.landing-main a { color: #0f62fe; }
+.landing-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1rem; }
+.landing-actions a.cds--btn { white-space: nowrap; }
+.landing-author p { margin: 0; }
+
 @media (max-width: 42rem) {
   .doc-shell { grid-template-columns: 1fr; }
   main.doc-main { padding: 1.5rem 1rem; }

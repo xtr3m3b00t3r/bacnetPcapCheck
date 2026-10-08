@@ -244,6 +244,54 @@ pub fn build_site(src_dir: &Path) -> io::Result<String> {
     ))
 }
 
+/// The landing page, the site root at `index.html`. Says what BACcheck is on one screen,
+/// links to the manual (relative, so it works on the Pages subpath) and the download,
+/// introduces the author, and states the no-outbound-calls rule.
+pub fn build_landing_page() -> String {
+    format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>BACcheck</title>\n<style>{CARBON_CSS}</style>\n<style>\n{DOCS_CSS}</style>\n</head>\n<body>\n\
+         <header class=\"doc-header\"><div class=\"doc-header__inner\">\
+         <span class=\"doc-header__product\">BACcheck</span></div></header>\n\
+         <main class=\"landing-main\">\n\
+         <h1>BACcheck</h1>\n\
+         <p class=\"landing-lead\">BACcheck reads a BACnet/IP capture (pcap or pcapng), decodes it, \
+         and reports the network problems a field engineer needs to fix, with prescriptive \
+         remediation steps for each finding.</p>\n\
+         <p class=\"landing-actions\">\
+         <a class=\"cds--btn cds--btn--primary\" \
+         href=\"https://github.com/xtr3m3b00t3r/bacnetPcapCheck/releases/latest\" \
+         rel=\"noopener\">Download the latest release</a>\
+         <a class=\"cds--btn cds--btn--secondary\" href=\"manual.html\">Read the manual</a>\
+         </p>\n\
+         <section>\n\
+         <h2>Getting started</h2>\n\
+         <p>The manual walks through the first capture, the report format, the ten issue types \
+         and their remediation steps: <a href=\"manual.html\">BACcheck documentation</a>. \
+         It is one self-contained file, so it opens offline on an air-gapped network.</p>\n\
+         </section>\n\
+         <section>\n\
+         <h2>Privacy</h2>\n\
+         <p>This page makes no outbound calls: no analytics, no tracking, no external fonts \
+         or scripts. What you read here never phones home.</p>\n\
+         </section>\n\
+         <section class=\"landing-author\">\n\
+         <h2>About the author</h2>\n\
+         <p>BACcheck is a personal project, shared to demonstrate engineering craft; it is not \
+         a product or a business. \
+         <a href=\"https://www.linkedin.com/in/benjamin-dw-truman/\" rel=\"noopener\">\
+         Benjamin D.W Truman</a> writes about the work on LinkedIn.</p>\n\
+         </section>\n\
+         </main>\n\
+         <footer class=\"doc-footer\"><div class=\"doc-footer__inner\">\
+         <span class=\"doc-footer__app\">BACcheck</span>\
+         <span class=\"doc-footer__credit\">MIT-licensed · Designed by \
+         <a href=\"https://www.linkedin.com/in/benjamin-dw-truman/\" rel=\"noopener\">Benjamin D.W Truman</a>\
+         </span></div></footer>\n</body>\n</html>\n"
+    )
+}
+
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")

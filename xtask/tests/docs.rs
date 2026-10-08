@@ -52,6 +52,16 @@ fn docs_src() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/src"))
 }
 
+/// The site root: the landing page. Separate file from the manual.
+fn landing() -> String {
+    xtask::docs::build_landing_page()
+}
+
+/// The manual: the existing self-contained one-file documentation site.
+fn manual() -> String {
+    build_site(docs_src()).expect("site builds")
+}
+
 #[test]
 fn site_holds_all_thirteen_pages() {
     assert_eq!(PAGES.len(), 13);
@@ -67,7 +77,8 @@ fn site_holds_all_thirteen_pages() {
 
 #[test]
 fn site_is_self_contained_and_subpath_safe() {
-    let html = build_site(docs_src()).expect("site builds");
+    // Every page of the site: the landing page and the manual.
+    let pages = [landing(), manual()];
     // Root-relative URLs break under the /bacnetPcapCheck/ GitHub Pages subpath, so no
     // page, stylesheet or script may use one.
     for forbidden in [
@@ -80,10 +91,12 @@ fn site_is_self_contained_and_subpath_safe() {
         "url('/",
         "url(\"/",
     ] {
-        assert!(
-            !html.contains(forbidden),
-            "found root-relative URL ({forbidden})"
-        );
+        for html in &pages {
+            assert!(
+                !html.contains(forbidden),
+                "found root-relative URL ({forbidden})"
+            );
+        }
     }
     // Resource loads from another origin. Hyperlinks (<a href="https://…") are fine; the
     // footer's LinkedIn link is one. Analytics and tracking elements are covered above too:
@@ -100,10 +113,12 @@ fn site_is_self_contained_and_subpath_safe() {
         "src='http",
         "src=\"http",
     ] {
-        assert!(
-            !html.contains(forbidden),
-            "found external resource ({forbidden})"
-        );
+        for html in &pages {
+            assert!(
+                !html.contains(forbidden),
+                "found external resource ({forbidden})"
+            );
+        }
     }
 }
 
@@ -121,7 +136,35 @@ fn committed_site_matches_the_sources() {
     let committed = std::fs::read_to_string(docs_src().join("../index.html"))
         .expect("docs/index.html is committed");
     assert!(
-        built == committed,
+        xtask::docs::build_landing_page() == committed,
         "docs/index.html is stale. Run `cargo xtask docs-build`."
+    );
+    let committed = std::fs::read_to_string(docs_src().join("../manual.html"))
+        .expect("docs/manual.html is committed");
+    assert!(
+        built == committed,
+        "docs/manual.html is stale. Run `cargo xtask docs-build`."
+    );
+}
+
+#[test]
+fn landing_page_says_what_it_is_and_links_to_manual_and_download() {
+    let page = landing();
+    // The manual and the download are both reachable from the landing page, at their new
+    // locations. The download points at the releases page; the manual stays relative.
+    assert!(page.contains("href=\"manual.html\""), "no manual link");
+    assert!(
+        page.contains("https://github.com/xtr3m3b00t3r/bacnetPcapCheck/releases"),
+        "no download link"
+    );
+    // The author block is short, links the profile, and carries no hire-me call to action.
+    assert!(
+        page.contains("https://www.linkedin.com/in/benjamin-dw-truman/"),
+        "no LinkedIn link"
+    );
+    // The no-outbound-calls rule is stated on the site, not just tested.
+    assert!(
+        page.contains("outbound"),
+        "no statement of the no-outbound-calls rule"
     );
 }
