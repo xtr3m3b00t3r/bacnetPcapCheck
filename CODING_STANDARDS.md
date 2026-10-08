@@ -17,3 +17,4 @@ Judgement calls only. Formatting, lints and tests are enforced by `.githooks/pre
 - Test detectors at the `fn(&[DecodeRecord], …) -> Vec<Finding>` seam with synthetic records. Build them from `tests/common/mod.rs`; add a builder there when a second test file wants it.
 - Per detector: one fixture that fires, one below the evidence floor that stays silent, and the severity-escalation case.
 - Correlating detectors get a reused-key-after-silence case and a segmented-frame case.
+- Adding a guard test: find the suite test that already guards the same property and extend it, never add a parallel test whose forbidden list is a superset of the old one.
