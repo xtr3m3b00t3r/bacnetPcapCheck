@@ -66,18 +66,20 @@ fn site_holds_all_thirteen_pages() {
 }
 
 #[test]
-fn site_is_self_contained() {
+fn site_is_self_contained_and_subpath_safe() {
     let html = build_site(docs_src()).expect("site builds");
-    for forbidden in ["<link", "<script src", "@import", "src=\"http", "url(http"] {
-        assert!(!html.contains(forbidden), "found {forbidden}");
-    }
-}
-
-#[test]
-fn site_loads_no_external_resources_and_has_no_root_relative_links() {
-    let html = build_site(docs_src()).expect("site builds");
-    // Root-relative URLs break under the /bacnetPcapCheck/ GitHub Pages subpath.
-    for forbidden in ["href=\"/", "src=\"/", "srcset=\"/", "href='/", "src='/"] {
+    // Root-relative URLs break under the /bacnetPcapCheck/ GitHub Pages subpath, so no
+    // page, stylesheet or script may use one.
+    for forbidden in [
+        "href=\"/",
+        "src=\"/",
+        "srcset=\"/",
+        "href='/",
+        "src='/",
+        "url(/",
+        "url('/",
+        "url(\"/",
+    ] {
         assert!(
             !html.contains(forbidden),
             "found root-relative URL ({forbidden})"
