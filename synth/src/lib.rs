@@ -12,6 +12,10 @@ use pcap_file::pcap::{PcapPacket, PcapWriter};
 /// Capture start: Friday 4 September 2026, 09:00:00 UTC.
 const START_SECS: u64 = 1_788_512_400;
 
+/// The sample capture's file name. It shows in the report, so the site's copy and the binary's
+/// must use the same one.
+pub const SAMPLE_CAPTURE_NAME: &str = "sample.pcap";
+
 /// The multi-finding capture behind the sample report and the hero recording. It holds three
 /// problems: device instance 101 on two IPs, a device that answers none of its twelve
 /// ReadProperty requests, and a foreign device whose BBMD NAKs every registration.

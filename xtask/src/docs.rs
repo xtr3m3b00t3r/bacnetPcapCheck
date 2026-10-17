@@ -338,13 +338,15 @@ pub fn build_landing_page() -> String {
     );
     let _ = writeln!(out, "</section>");
     let _ = writeln!(out, "</main>");
-    let _ = writeln!(
-        out,
-        "<footer class=\"doc-footer\"><div class=\"doc-footer__inner\">\
-         <span class=\"doc-footer__app\">BACcheck</span>\
-         <span class=\"doc-footer__credit\">MIT-licensed · Designed by \
-         <a href=\"{LINKEDIN}\" rel=\"noopener\">Benjamin D.W Truman</a>\
-         </span></div></footer>"
+    let credit = format!(
+        "<a href=\"{LINKEDIN}\" rel=\"noopener\">Benjamin D.W Truman</a></span></div></footer>"
+    );
+    prose(
+        &mut out,
+        &[
+            "<footer class=\"doc-footer\"><div class=\"doc-footer__inner\"><span class=\"doc-footer__app\">BACcheck</span><span class=\"doc-footer__credit\">MIT-licensed · Designed by",
+            &credit,
+        ],
     );
     let _ = writeln!(out, "</body>");
     let _ = writeln!(out, "</html>");
@@ -361,7 +363,7 @@ fn prose(out: &mut String, parts: &[&str]) {
 /// capture run through the same pipeline and renderer as the `baccheck` binary, no filter.
 pub fn build_sample_report() -> io::Result<String> {
     let dir = tempfile::tempdir()?;
-    let capture = dir.path().join("sample.pcap");
+    let capture = dir.path().join(baccheck_synth::SAMPLE_CAPTURE_NAME);
     std::fs::write(&capture, baccheck_synth::sample_capture())?;
     let report = analyse_capture(&capture).map_err(|e| io::Error::other(e.to_string()))?;
     Ok(render_html(&report, None))

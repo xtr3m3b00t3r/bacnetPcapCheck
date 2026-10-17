@@ -337,21 +337,26 @@ fn quiet_still_prints_the_capture_health_warning() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("Warning."));
 }
 
+/// Runs the binary on the synthetic sample capture; returns its output and the report it wrote.
+fn run_sample_capture() -> (Output, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join(baccheck_synth::SAMPLE_CAPTURE_NAME);
+    std::fs::write(&capture, baccheck_synth::sample_capture()).unwrap();
+    let out = baccheck(&[capture.as_os_str()]);
+    let report = std::fs::read_to_string(dir.path().join("sample.baccheck.html")).unwrap();
+    (out, report)
+}
+
 /// The site's sample report comes from this capture, so it must show exactly these findings.
 #[test]
 fn sample_capture_produces_exactly_its_findings() {
     use baccheck_core::report::IssueId;
 
-    let dir = tempfile::tempdir().unwrap();
-    let capture = dir.path().join("sample.pcap");
-    std::fs::write(&capture, baccheck_synth::sample_capture()).unwrap();
-
-    let out = baccheck(&[capture.as_os_str()]);
+    let (out, report) = run_sample_capture();
 
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("3 findings."), "{stdout}");
-    let report = std::fs::read_to_string(dir.path().join("sample.baccheck.html")).unwrap();
     let expected = [
         IssueId::DuplicateDeviceId,
         IssueId::UnresponsiveDevice,
@@ -365,7 +370,13 @@ fn sample_capture_produces_exactly_its_findings() {
             "{name} in the report"
         );
     }
-    // The site publishes the docs build's render; it must be what the binary writes.
+}
+
+/// The site publishes the docs build's render of the sample capture; it must be what the
+/// binary writes.
+#[test]
+fn the_site_sample_report_is_what_the_binary_writes() {
+    let (_, report) = run_sample_capture();
     let published = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../docs/sample-report.html"
