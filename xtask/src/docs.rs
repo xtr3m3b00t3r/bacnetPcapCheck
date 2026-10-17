@@ -249,53 +249,112 @@ pub fn build_site(src_dir: &Path) -> io::Result<String> {
 /// links to the manual (relative, so it works on the Pages subpath) and the download,
 /// introduces the author, and states the no-outbound-calls rule.
 pub fn build_landing_page() -> String {
-    format!(
-        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>BACcheck</title>\n<style>{CARBON_CSS}</style>\n<style>\n{DOCS_CSS}</style>\n</head>\n<body>\n\
-         <header class=\"doc-header\"><div class=\"doc-header__inner\">\
-         <span class=\"doc-header__product\">BACcheck</span></div></header>\n\
-         <main class=\"landing-main\">\n\
-         <h1>BACcheck</h1>\n\
-         <p class=\"landing-lead\">BACcheck reads a BACnet/IP capture (pcap or pcapng), decodes it, \
-         and reports the network problems a field engineer needs to fix, with prescriptive \
-         remediation steps for each finding.</p>\n\
-         <p class=\"landing-actions\">\
-         <a class=\"cds--btn cds--btn--primary\" \
+    const LINKEDIN: &str = "https://www.linkedin.com/in/benjamin-dw-truman/";
+    let mut out = String::new();
+    for line in [
+        "<!DOCTYPE html>",
+        "<html lang=\"en\">",
+        "<head>",
+        "<meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>BACcheck</title>",
+    ] {
+        let _ = writeln!(out, "{line}");
+    }
+    let _ = writeln!(out, "<style>{CARBON_CSS}</style>");
+    let _ = writeln!(out, "<style>");
+    let _ = writeln!(out, "{DOCS_CSS}</style>");
+    let _ = writeln!(out, "</head>");
+    let _ = writeln!(out, "<body>");
+    let _ = writeln!(
+        out,
+        "<header class=\"doc-header\"><div class=\"doc-header__inner\">\
+         <span class=\"doc-header__product\">BACcheck</span></div></header>"
+    );
+    let _ = writeln!(out, "<main class=\"landing-main\">");
+    let _ = writeln!(out, "<h1>BACcheck</h1>");
+    prose(
+        &mut out,
+        &[
+            "<p class=\"landing-lead\">BACcheck reads a BACnet/IP capture (pcap or pcapng), decodes it,",
+            "and reports the network problems a field engineer needs to fix, with prescriptive",
+            "remediation steps for each finding.</p>",
+        ],
+    );
+    let _ = writeln!(
+        out,
+        "<p class=\"landing-actions\"><a class=\"cds--btn cds--btn--primary\" \
          href=\"https://github.com/xtr3m3b00t3r/bacnetPcapCheck/releases/latest\" \
-         rel=\"noopener\">Download the latest release</a>\
-         <a class=\"cds--btn cds--btn--secondary\" href=\"manual.html\">Read the manual</a>\
-         </p>\n\
-         <section>\n\
-         <h2>Getting started</h2>\n\
-         <p>The manual walks through the first capture, the report format, the ten issue types \
-         and their remediation steps: <a href=\"manual.html\">BACcheck documentation</a>. \
-         It is one self-contained file, so it opens offline on an air-gapped network.</p>\n\
-         </section>\n\
-         <section>\n\
-         <h2>Sample report</h2>\n\
-         <p>This is the report BACcheck writes, from a synthetic capture with three findings.</p>\n\
-         <p><a href=\"sample-report.html\">Open the sample report</a></p>\n\
-         </section>\n\
-         <section>\n\
-         <h2>Privacy</h2>\n\
-         <p>This page makes no outbound calls: no analytics, no tracking, no external fonts \
-         or scripts. What you read here never phones home.</p>\n\
-         </section>\n\
-         <section class=\"landing-author\">\n\
-         <h2>About the author</h2>\n\
-         <p>BACcheck is a personal project, shared to demonstrate engineering craft; it is not \
-         a product or a business. \
-         <a href=\"https://www.linkedin.com/in/benjamin-dw-truman/\" rel=\"noopener\">\
-         Benjamin D.W Truman</a> writes about the work on LinkedIn.</p>\n\
-         </section>\n\
-         </main>\n\
-         <footer class=\"doc-footer\"><div class=\"doc-footer__inner\">\
+         rel=\"noopener\">Download the latest release</a><a class=\"cds--btn cds--btn--secondary\" \
+         href=\"manual.html\">Read the manual</a></p>"
+    );
+    let _ = writeln!(out, "<section>");
+    let _ = writeln!(out, "<h2>Getting started</h2>");
+    prose(
+        &mut out,
+        &[
+            "<p>The manual walks through the first capture, the report format, the ten issue types",
+            "and their remediation steps: <a href=\"manual.html\">BACcheck documentation</a>.",
+            "It is one self-contained file, so it opens offline on an air-gapped network.</p>",
+        ],
+    );
+    let _ = writeln!(out, "</section>");
+    let _ = writeln!(out, "<section>");
+    let _ = writeln!(out, "<h2>Sample report</h2>");
+    prose(
+        &mut out,
+        &[
+            "<p>This is the report BACcheck writes,",
+            "from a synthetic capture with three findings.</p>",
+        ],
+    );
+    let _ = writeln!(
+        out,
+        "<p><a href=\"sample-report.html\">Open the sample report</a></p>"
+    );
+    let _ = writeln!(out, "</section>");
+    let _ = writeln!(out, "<section>");
+    let _ = writeln!(out, "<h2>Privacy</h2>");
+    prose(
+        &mut out,
+        &[
+            "<p>This page makes no outbound calls: no analytics, no tracking, no external fonts",
+            "or scripts. What you read here never phones home.</p>",
+        ],
+    );
+    let _ = writeln!(out, "</section>");
+    let _ = writeln!(out, "<section class=\"landing-author\">");
+    let _ = writeln!(out, "<h2>About the author</h2>");
+    let author = format!(
+        "<a href=\"{LINKEDIN}\" rel=\"noopener\">Benjamin D.W Truman</a> writes about the work on LinkedIn.</p>"
+    );
+    prose(
+        &mut out,
+        &[
+            "<p>BACcheck is a personal project, shared to demonstrate engineering craft; it is not",
+            "a product or a business.",
+            &author,
+        ],
+    );
+    let _ = writeln!(out, "</section>");
+    let _ = writeln!(out, "</main>");
+    let _ = writeln!(
+        out,
+        "<footer class=\"doc-footer\"><div class=\"doc-footer__inner\">\
          <span class=\"doc-footer__app\">BACcheck</span>\
          <span class=\"doc-footer__credit\">MIT-licensed · Designed by \
-         <a href=\"https://www.linkedin.com/in/benjamin-dw-truman/\" rel=\"noopener\">Benjamin D.W Truman</a>\
-         </span></div></footer>\n</body>\n</html>\n"
-    )
+         <a href=\"{LINKEDIN}\" rel=\"noopener\">Benjamin D.W Truman</a>\
+         </span></div></footer>"
+    );
+    let _ = writeln!(out, "</body>");
+    let _ = writeln!(out, "</html>");
+    out
+}
+
+/// Writes one output line of running text from `parts`, joined by single spaces: the seam
+/// between source lines is explicit, so no space is lost at a join.
+fn prose(out: &mut String, parts: &[&str]) {
+    let _ = writeln!(out, "{}", parts.join(" "));
 }
 
 /// The sample report, at `sample-report.html` beside the landing page: the synthetic sample

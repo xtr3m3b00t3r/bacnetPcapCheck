@@ -88,7 +88,8 @@ fn addr(ip: &str) -> SocketAddrV4 {
     SocketAddrV4::new(ip.parse().expect("IPv4 literal"), 47808)
 }
 
-fn ethernet_ipv4_udp(src: SocketAddrV4, dst: SocketAddrV4, payload: &[u8]) -> Vec<u8> {
+/// An Ethernet II frame carrying `payload` in IPv4/UDP from `src` to `dst`. Checksums are zero.
+pub fn ethernet_ipv4_udp(src: SocketAddrV4, dst: SocketAddrV4, payload: &[u8]) -> Vec<u8> {
     let udp_len = 8 + payload.len();
     // Locally administered MAC addresses, then EtherType IPv4.
     let mut frame = vec![0x02, 0, 0, 0, 0, 0x02, 0x02, 0, 0, 0, 0, 0x01, 0x08, 0x00];

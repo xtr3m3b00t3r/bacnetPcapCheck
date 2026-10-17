@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -58,32 +57,13 @@ fn i_am_payload(instance: u32) -> Vec<u8> {
     frame
 }
 
-fn ethernet_ipv4_udp_frame(src: SocketAddr, dst: SocketAddr, payload: &[u8]) -> Vec<u8> {
-    let (SocketAddr::V4(src), SocketAddr::V4(dst)) = (src, dst) else {
-        panic!("IPv4 only");
-    };
-    let udp_len = 8 + payload.len();
-    let mut frame = vec![0x02, 0, 0, 0, 0, 0x02, 0x02, 0, 0, 0, 0, 0x01, 0x08, 0x00];
-    frame.extend_from_slice(&[0x45, 0x00]);
-    frame.extend_from_slice(&((20 + udp_len) as u16).to_be_bytes());
-    frame.extend_from_slice(&[0, 0, 0, 0, 64, 17, 0, 0]);
-    frame.extend_from_slice(&src.ip().octets());
-    frame.extend_from_slice(&dst.ip().octets());
-    frame.extend_from_slice(&src.port().to_be_bytes());
-    frame.extend_from_slice(&dst.port().to_be_bytes());
-    frame.extend_from_slice(&(udp_len as u16).to_be_bytes());
-    frame.extend_from_slice(&[0, 0]);
-    frame.extend_from_slice(payload);
-    frame
-}
-
 /// Writes a pcap holding one I-Am per `(source, device instance)` pair.
 fn write_capture(path: &Path, i_ams: &[(&str, u32)]) {
     let mut buf = Vec::new();
     {
         let mut writer = PcapWriter::new(&mut buf).expect("pcap header");
         for (n, (src, instance)) in i_ams.iter().enumerate() {
-            let frame = ethernet_ipv4_udp_frame(
+            let frame = baccheck_synth::ethernet_ipv4_udp(
                 src.parse().unwrap(),
                 "10.0.0.255:47808".parse().unwrap(),
                 &i_am_payload(*instance),
@@ -385,6 +365,16 @@ fn sample_capture_produces_exactly_its_findings() {
             "{name} in the report"
         );
     }
+    // The site publishes the docs build's render; it must be what the binary writes.
+    let published = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../docs/sample-report.html"
+    ))
+    .unwrap();
+    assert!(
+        report == published,
+        "docs/sample-report.html differs from the binary's report"
+    );
 }
 
 /// The generator is a development tool: the release binary must not link it.
