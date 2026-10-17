@@ -337,14 +337,46 @@ fn quiet_still_prints_the_capture_health_warning() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("Warning."));
 }
 
-/// Runs the binary on the synthetic sample capture; returns its output and the report it wrote.
-fn run_sample_capture() -> (Output, String) {
+/// Runs the binary on synthetic `capture` saved as `name`; returns its output and the report it
+/// wrote.
+fn run_synthetic_capture(name: &str, capture: Vec<u8>) -> (Output, String) {
     let dir = tempfile::tempdir().unwrap();
-    let capture = dir.path().join(baccheck_synth::SAMPLE_CAPTURE_NAME);
-    std::fs::write(&capture, baccheck_synth::sample_capture()).unwrap();
-    let out = baccheck(&[capture.as_os_str()]);
-    let report = std::fs::read_to_string(dir.path().join("sample.baccheck.html")).unwrap();
+    let path = dir.path().join(name);
+    std::fs::write(&path, capture).unwrap();
+    let out = baccheck(&[path.as_os_str()]);
+    let stem = name.strip_suffix(".pcap").expect("a .pcap name");
+    let report = std::fs::read_to_string(dir.path().join(format!("{stem}.baccheck.html"))).unwrap();
     (out, report)
+}
+
+fn run_sample_capture() -> (Output, String) {
+    run_synthetic_capture(
+        baccheck_synth::SAMPLE_CAPTURE_NAME,
+        baccheck_synth::sample_capture(),
+    )
+}
+
+/// Asserts the run exited 1 and the report names exactly the `expected` issues.
+fn assert_exactly_these_findings(
+    out: &Output,
+    report: &str,
+    expected: &[baccheck_core::report::IssueId],
+) {
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let count = match expected.len() {
+        1 => "1 finding.".to_string(),
+        n => format!("{n} findings."),
+    };
+    assert!(stdout.contains(&count), "{stdout}");
+    for issue in baccheck_core::report::IssueId::ALL {
+        let name = issue.spec().display_name;
+        assert_eq!(
+            report.contains(name),
+            expected.contains(&issue),
+            "{name} in the report"
+        );
+    }
 }
 
 /// The site's sample report comes from this capture, so it must show exactly these findings.
@@ -354,21 +386,35 @@ fn sample_capture_produces_exactly_its_findings() {
 
     let (out, report) = run_sample_capture();
 
-    assert_eq!(out.status.code(), Some(1), "{out:?}");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("3 findings."), "{stdout}");
-    let expected = [
-        IssueId::DuplicateDeviceId,
-        IssueId::UnresponsiveDevice,
-        IssueId::ForeignDeviceRegistrationFailure,
-    ];
-    for issue in IssueId::ALL {
-        let name = issue.spec().display_name;
-        assert_eq!(
-            report.contains(name),
-            expected.contains(&issue),
-            "{name} in the report"
-        );
+    assert_exactly_these_findings(
+        &out,
+        &report,
+        &[
+            IssueId::DuplicateDeviceId,
+            IssueId::UnresponsiveDevice,
+            IssueId::ForeignDeviceRegistrationFailure,
+        ],
+    );
+}
+
+/// Each per-detector demo capture triggers its own detector and no other (spec #30, story 18).
+#[test]
+fn each_demo_capture_produces_exactly_its_own_finding() {
+    use baccheck_core::report::IssueId;
+
+    for (issue, capture) in [
+        (
+            IssueId::DuplicateDeviceId,
+            baccheck_synth::duplicate_device_id_capture(),
+        ),
+        (
+            IssueId::BroadcastStorm,
+            baccheck_synth::broadcast_storm_capture(),
+        ),
+        (IssueId::UnicastIAm, baccheck_synth::unicast_i_am_capture()),
+    ] {
+        let (out, report) = run_synthetic_capture("demo.pcap", capture);
+        assert_exactly_these_findings(&out, &report, &[issue]);
     }
 }
 

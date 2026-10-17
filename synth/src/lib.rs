@@ -57,16 +57,80 @@ pub fn sample_capture() -> Vec<u8> {
     capture.into_pcap()
 }
 
+/// Rule 1 demo: device instance 101 answers from two IPs while three other devices are unique.
+/// Each device broadcasts an I-Am every 60 s for five minutes.
+pub fn duplicate_device_id_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr("10.0.0.255");
+    let devices = [
+        ("10.0.0.5", 101),
+        ("10.0.0.6", 101),
+        ("10.0.0.7", 202),
+        ("10.0.0.8", 303),
+        ("10.0.0.9", 404),
+    ];
+    for round in 0..5 {
+        for (n, (ip, instance)) in (0u64..).zip(devices) {
+            capture.push(round * 60 + n, addr(ip), broadcast, &i_am(instance));
+        }
+    }
+    capture.into_pcap()
+}
+
+/// Rule 8 demo: device 1200 sends an unprompted unicast I-Am to the supervisor every 30 s, twelve
+/// in all. Device 202 also answers unicast, but to a directed Who-Is, which is correct; the other
+/// devices announce themselves by broadcast.
+pub fn unicast_i_am_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr("10.0.0.255");
+    let supervisor = addr("10.0.0.1");
+    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
+        capture.push(n, addr(ip), broadcast, &i_am(instance));
+    }
+    for n in 0..12 {
+        capture.push(
+            5 + n * 30,
+            addr("10.0.0.12"),
+            supervisor,
+            &unicast_i_am(1200),
+        );
+    }
+    capture.push(100, supervisor, addr("10.0.0.7"), &directed_who_is());
+    capture.push(101, addr("10.0.0.7"), supervisor, &unicast_i_am(202));
+    capture.into_pcap()
+}
+
+/// Rule 2 demo: a supervisor broadcasts a Who-Is once a minute for six minutes, the span floor.
+/// From 120 s to 180 s three controllers each broadcast four Who-Is a second: 12/s against a
+/// limit of 10/s.
+pub fn broadcast_storm_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr("10.0.0.255");
+    for minute in 0..=6 {
+        capture.push(minute * 60, addr("10.0.0.1"), broadcast, &who_is());
+    }
+    for tick in 0..240u64 {
+        let at = Duration::from_secs(120) + Duration::from_millis(tick * 250);
+        for ip in ["10.0.0.21", "10.0.0.22", "10.0.0.23"] {
+            capture.push_at(at, addr(ip), broadcast, &who_is());
+        }
+    }
+    capture.into_pcap()
+}
+
 /// Frames in capture order, each with its offset from [`START_SECS`].
 #[derive(Default)]
 struct Capture {
-    frames: Vec<(u64, Vec<u8>)>,
+    frames: Vec<(Duration, Vec<u8>)>,
 }
 
 impl Capture {
     fn push(&mut self, at_secs: u64, src: SocketAddrV4, dst: SocketAddrV4, bvlc: &[u8]) {
-        self.frames
-            .push((at_secs, ethernet_ipv4_udp(src, dst, bvlc)));
+        self.push_at(Duration::from_secs(at_secs), src, dst, bvlc);
+    }
+
+    fn push_at(&mut self, at: Duration, src: SocketAddrV4, dst: SocketAddrV4, bvlc: &[u8]) {
+        self.frames.push((at, ethernet_ipv4_udp(src, dst, bvlc)));
     }
 
     fn into_pcap(mut self) -> Vec<u8> {
@@ -76,7 +140,7 @@ impl Capture {
             let mut writer = PcapWriter::new(&mut buf).expect("pcap header");
             for (at, frame) in &self.frames {
                 let packet = PcapPacket::new(
-                    Duration::from_secs(START_SECS + at),
+                    Duration::from_secs(START_SECS) + *at,
                     frame.len() as u32,
                     frame,
                 );
@@ -125,10 +189,30 @@ fn device_object_id(instance: u32) -> [u8; 4] {
 
 /// A broadcast I-Am: max APDU 1476, no segmentation, vendor 999.
 fn i_am(instance: u32) -> Vec<u8> {
+    i_am_with(0x0B, instance)
+}
+
+/// The same I-Am sent Original-Unicast-NPDU.
+fn unicast_i_am(instance: u32) -> Vec<u8> {
+    i_am_with(0x0A, instance)
+}
+
+/// An I-Am in a BVLC frame of `function`.
+fn i_am_with(function: u8, instance: u32) -> Vec<u8> {
     let mut npdu = vec![0x01, 0x00, 0x10, 0x00, 0xC4];
     npdu.extend_from_slice(&device_object_id(instance));
     npdu.extend_from_slice(&[0x22, 0x05, 0xC4, 0x91, 0x03, 0x22, 0x03, 0xE7]);
-    bvlc(0x0B, &npdu)
+    bvlc(function, &npdu)
+}
+
+/// A broadcast Who-Is with no device range: every device should answer.
+fn who_is() -> Vec<u8> {
+    bvlc(0x0B, &[0x01, 0x00, 0x10, 0x08])
+}
+
+/// The same Who-Is sent Original-Unicast-NPDU: a directed Who-Is.
+fn directed_who_is() -> Vec<u8> {
+    bvlc(0x0A, &[0x01, 0x00, 0x10, 0x08])
 }
 
 /// A unicast ReadProperty of device `instance`'s Object_Name (property 77).
