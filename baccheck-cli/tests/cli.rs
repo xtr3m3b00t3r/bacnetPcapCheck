@@ -349,6 +349,7 @@ fn run_synthetic_capture(name: &str, capture: Vec<u8>) -> (Output, String) {
     (out, report)
 }
 
+/// Runs the binary on the synthetic sample capture; returns its output and the report it wrote.
 fn run_sample_capture() -> (Output, String) {
     run_synthetic_capture(
         baccheck_synth::SAMPLE_CAPTURE_NAME,
@@ -402,19 +403,34 @@ fn sample_capture_produces_exactly_its_findings() {
 fn each_demo_capture_produces_exactly_its_own_finding() {
     use baccheck_core::report::IssueId;
 
-    for (issue, capture) in [
+    // The severity pins each capture to the trigger it is built for: High is two claiming IPs,
+    // Critical is the storm's >50% broadcast share, Medium is >50% of >=10 I-Ams unmatched.
+    for (issue, severity, capture) in [
         (
             IssueId::DuplicateDeviceId,
+            "HIGH",
             baccheck_synth::duplicate_device_id_capture(),
         ),
         (
             IssueId::BroadcastStorm,
+            "CRITICAL",
             baccheck_synth::broadcast_storm_capture(),
         ),
-        (IssueId::UnicastIAm, baccheck_synth::unicast_i_am_capture()),
+        (
+            IssueId::UnicastIAm,
+            "MEDIUM",
+            baccheck_synth::unicast_i_am_capture(),
+        ),
     ] {
         let (out, report) = run_synthetic_capture("demo.pcap", capture);
         assert_exactly_these_findings(&out, &report, &[issue]);
+        for tag in ["CRITICAL", "HIGH", "MEDIUM", "LOW"] {
+            assert_eq!(
+                report.contains(&format!("rpt-sev\">{tag}<")),
+                tag == severity,
+                "{tag} tag in the {issue:?} report"
+            );
+        }
     }
 }
 

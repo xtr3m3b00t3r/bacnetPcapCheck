@@ -58,7 +58,8 @@ pub fn sample_capture() -> Vec<u8> {
 }
 
 /// Rule 1 demo: device instance 101 answers from two IPs while three other devices are unique.
-/// Each device broadcasts an I-Am every 60 s for five minutes.
+/// Each device broadcasts an I-Am every 60 s, five rounds over four minutes: under the rate rules'
+/// five-minute span floor, so the storm rule stays silent.
 pub fn duplicate_device_id_capture() -> Vec<u8> {
     let mut capture = Capture::default();
     let broadcast = addr("10.0.0.255");
@@ -100,9 +101,10 @@ pub fn unicast_i_am_capture() -> Vec<u8> {
     capture.into_pcap()
 }
 
-/// Rule 2 demo: a supervisor broadcasts a Who-Is once a minute for six minutes, the span floor.
-/// From 120 s to 180 s three controllers each broadcast four Who-Is a second: 12/s against a
-/// limit of 10/s.
+/// Rule 2 demo: a supervisor broadcasts a Who-Is once a minute for six minutes, past the
+/// five-minute span floor. From 120 s to 180 s three controllers each broadcast four Who-Is a
+/// second: 12/s against a limit of 10/s. Every frame is a broadcast, so broadcast saturation
+/// fires as well and the share above 50% makes it Critical, as a real Who-Is storm would.
 pub fn broadcast_storm_capture() -> Vec<u8> {
     let mut capture = Capture::default();
     let broadcast = addr("10.0.0.255");
@@ -174,6 +176,12 @@ pub fn ethernet_ipv4_udp(src: SocketAddrV4, dst: SocketAddrV4, payload: &[u8]) -
     frame
 }
 
+/// BVLC function Original-Unicast-NPDU.
+const ORIGINAL_UNICAST: u8 = 0x0A;
+
+/// BVLC function Original-Broadcast-NPDU.
+const ORIGINAL_BROADCAST: u8 = 0x0B;
+
 /// A BVLC frame: type 0x81, `function`, the 2-byte total length, then `body`.
 fn bvlc(function: u8, body: &[u8]) -> Vec<u8> {
     let mut frame = vec![0x81, function];
@@ -189,12 +197,12 @@ fn device_object_id(instance: u32) -> [u8; 4] {
 
 /// A broadcast I-Am: max APDU 1476, no segmentation, vendor 999.
 fn i_am(instance: u32) -> Vec<u8> {
-    i_am_with(0x0B, instance)
+    i_am_with(ORIGINAL_BROADCAST, instance)
 }
 
 /// The same I-Am sent Original-Unicast-NPDU.
 fn unicast_i_am(instance: u32) -> Vec<u8> {
-    i_am_with(0x0A, instance)
+    i_am_with(ORIGINAL_UNICAST, instance)
 }
 
 /// An I-Am in a BVLC frame of `function`.
@@ -207,12 +215,17 @@ fn i_am_with(function: u8, instance: u32) -> Vec<u8> {
 
 /// A broadcast Who-Is with no device range: every device should answer.
 fn who_is() -> Vec<u8> {
-    bvlc(0x0B, &[0x01, 0x00, 0x10, 0x08])
+    who_is_with(ORIGINAL_BROADCAST)
 }
 
 /// The same Who-Is sent Original-Unicast-NPDU: a directed Who-Is.
 fn directed_who_is() -> Vec<u8> {
-    bvlc(0x0A, &[0x01, 0x00, 0x10, 0x08])
+    who_is_with(ORIGINAL_UNICAST)
+}
+
+/// A Who-Is with no device range in a BVLC frame of `function`.
+fn who_is_with(function: u8) -> Vec<u8> {
+    bvlc(function, &[0x01, 0x00, 0x10, 0x08])
 }
 
 /// A unicast ReadProperty of device `instance`'s Object_Name (property 77).
@@ -221,7 +234,7 @@ fn read_property(invoke_id: u8, instance: u32) -> Vec<u8> {
     let mut npdu = vec![0x01, 0x04, 0x00, 0x05, invoke_id, 0x0C, 0x0C];
     npdu.extend_from_slice(&device_object_id(instance));
     npdu.extend_from_slice(&[0x19, 0x4D]);
-    bvlc(0x0A, &npdu)
+    bvlc(ORIGINAL_UNICAST, &npdu)
 }
 
 /// Register-Foreign-Device with a time-to-live of `ttl_secs`.
