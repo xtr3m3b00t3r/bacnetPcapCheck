@@ -4,7 +4,7 @@
 //! Every frame is built byte by byte (Ethernet, IPv4, UDP, BVLC, NPDU, APDU), the way the CLI
 //! test fixtures are. No byte comes from a real network.
 
-use std::net::SocketAddrV4;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
 
 use pcap_file::pcap::{PcapPacket, PcapWriter};
@@ -15,8 +15,23 @@ const START_SECS: u64 = 1_788_512_400;
 /// The directed broadcast of the demo segment, 10.0.0.0/24.
 const BROADCAST: &str = "10.0.0.255";
 
-/// The segment's supervisor, and in the sample capture its BBMD.
+/// The segment's supervisor.
 const SUPERVISOR: &str = "10.0.0.1";
+
+/// The segment's BBMD: the supervisor holds that role too.
+const BBMD: &str = SUPERVISOR;
+
+/// A second BBMD on the segment, which the duplicate-BBMD demo adds.
+const SECOND_BBMD: &str = "10.0.0.2";
+
+/// A supervisor on remote network 10.1.0.0/24, whose broadcasts BBMDs relay into the segment.
+const REMOTE_SUPERVISOR: &str = "10.1.0.5";
+
+/// A foreign device whose BBMD NAKs every registration.
+const REFUSED_FOREIGN_DEVICE: &str = "192.168.50.20";
+
+/// The BACnet/IP UDP port.
+const BACNET_PORT: u16 = 47808;
 
 /// The sample capture's file name. It shows in the report, so the site's copy and the binary's
 /// must use the same one.
@@ -48,14 +63,14 @@ pub fn sample_capture() -> Vec<u8> {
         let at = 20 + n * 20;
         capture.push(
             at,
-            addr("192.168.50.20"),
-            addr(SUPERVISOR),
+            addr(REFUSED_FOREIGN_DEVICE),
+            addr(BBMD),
             &register_foreign_device(60),
         );
         capture.push(
             at + 1,
-            addr(SUPERVISOR),
-            addr("192.168.50.20"),
+            addr(BBMD),
+            addr(REFUSED_FOREIGN_DEVICE),
             &register_nak(),
         );
     }
@@ -89,10 +104,7 @@ pub fn duplicate_device_id_capture() -> Vec<u8> {
 /// devices announce themselves by broadcast.
 pub fn unicast_i_am_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr(BROADCAST);
-    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
-        capture.push(n, addr(ip), broadcast, &i_am(instance));
-    }
+    capture.announce_bystanders();
     for n in 0..12 {
         capture.push(
             5 + n * 30,
@@ -127,28 +139,21 @@ pub fn broadcast_storm_capture() -> Vec<u8> {
 
 /// Rule 4 demo: two BBMDs, 10.0.0.1 and 10.0.0.2, both hold a BDT entry for remote network
 /// 10.1.0.0/24, so each relays the remote supervisor's Who-Is into this segment: every broadcast
-/// arrives twice, twelve sightings in all. Two forwarders make it High. The frames span under the
-/// rate rules' five-minute floor, so neither the loop trigger nor the storm rule may fire.
+/// arrives twice, twelve sightings in all. Two forwarders make it High. The loop trigger cannot
+/// fire: no minute holds more than four sightings, against a limit of five. The frames also span
+/// under the rate rules' five-minute floor, which keeps the storm rule silent.
 pub fn duplicate_bbmd_capture() -> Vec<u8> {
     let mut capture = Capture::default();
     let broadcast = addr(BROADCAST);
-    let remote_supervisor = addr("10.1.0.5");
-    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
-        capture.push(n, addr(ip), broadcast, &i_am(instance));
-    }
+    capture.announce_bystanders();
     for round in 0..6u64 {
         let at = Duration::from_secs(10 + round * 40);
-        capture.push_at(
-            at,
-            addr(SUPERVISOR),
-            broadcast,
-            &forwarded(remote_supervisor, &WHO_IS_NPDU),
-        );
+        capture.push_at(at, addr(BBMD), broadcast, &forwarded_remote_who_is());
         capture.push_at(
             at + Duration::from_millis(3),
-            addr("10.0.0.2"),
+            addr(SECOND_BBMD),
             broadcast,
-            &forwarded(remote_supervisor, &WHO_IS_NPDU),
+            &forwarded_remote_who_is(),
         );
     }
     capture.into_pcap()
@@ -163,10 +168,10 @@ pub fn incomplete_bdt_capture() -> Vec<u8> {
     let broadcast = addr(BROADCAST);
     for round in 0..5 {
         for n in 0..10u8 {
-            let ip = std::net::Ipv4Addr::new(10, 0, 0, 11 + n);
+            let ip = Ipv4Addr::new(10, 0, 0, 11 + n);
             capture.push(
                 round * 60 + u64::from(n),
-                SocketAddrV4::new(ip, 47808),
+                SocketAddrV4::new(ip, BACNET_PORT),
                 broadcast,
                 &i_am(1101 + u32::from(n)),
             );
@@ -177,7 +182,7 @@ pub fn incomplete_bdt_capture() -> Vec<u8> {
             30 + n * 60,
             addr("10.1.0.1"),
             broadcast,
-            &forwarded(addr("10.1.0.5"), &WHO_IS_NPDU),
+            &forwarded_remote_who_is(),
         );
     }
     capture.into_pcap()
@@ -188,29 +193,22 @@ pub fn incomplete_bdt_capture() -> Vec<u8> {
 /// 192.168.60.30 registers once and is accepted, which is not a finding.
 pub fn foreign_device_registration_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr(BROADCAST);
-    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
-        capture.push(n, addr(ip), broadcast, &i_am(instance));
-    }
-    capture.push(
-        5,
-        addr("192.168.60.30"),
-        addr(SUPERVISOR),
-        &register_foreign_device(300),
-    );
-    capture.push(6, addr(SUPERVISOR), addr("192.168.60.30"), &register_ack());
+    capture.announce_bystanders();
+    let accepted = addr("192.168.60.30");
+    capture.push(5, accepted, addr(BBMD), &register_foreign_device(300));
+    capture.push(6, addr(BBMD), accepted, &register_ack());
     for n in 0..8 {
         let at = 10 + n * 30;
         capture.push(
             at,
-            addr("192.168.50.20"),
-            addr(SUPERVISOR),
+            addr(REFUSED_FOREIGN_DEVICE),
+            addr(BBMD),
             &register_foreign_device(60),
         );
         capture.push(
             at + 1,
-            addr(SUPERVISOR),
-            addr("192.168.50.20"),
+            addr(BBMD),
+            addr(REFUSED_FOREIGN_DEVICE),
             &register_nak(),
         );
     }
@@ -222,11 +220,8 @@ pub fn foreign_device_registration_capture() -> Vec<u8> {
 /// first minute, more than ten makes it High.
 pub fn routing_rejection_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr(BROADCAST);
     let router = addr("10.0.0.30");
-    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
-        capture.push(n, addr(ip), broadcast, &i_am(instance));
-    }
+    capture.announce_bystanders();
     for n in 0..12 {
         let at = 2 + n * 5;
         capture.push(
@@ -252,6 +247,14 @@ struct Capture {
 }
 
 impl Capture {
+    /// Two well-behaved devices, 202 and 303, broadcast an I-Am in the first two seconds.
+    fn announce_bystanders(&mut self) {
+        let broadcast = addr(BROADCAST);
+        for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
+            self.push(n, addr(ip), broadcast, &i_am(instance));
+        }
+    }
+
     fn push(&mut self, at_secs: u64, src: SocketAddrV4, dst: SocketAddrV4, bvlc: &[u8]) {
         self.push_at(Duration::from_secs(at_secs), src, dst, bvlc);
     }
@@ -278,9 +281,9 @@ impl Capture {
     }
 }
 
-/// `ip` on the BACnet/IP port, 47808.
+/// `ip` on the BACnet/IP port.
 fn addr(ip: &str) -> SocketAddrV4 {
-    SocketAddrV4::new(ip.parse().expect("IPv4 literal"), 47808)
+    SocketAddrV4::new(ip.parse().expect("IPv4 literal"), BACNET_PORT)
 }
 
 /// An Ethernet II frame carrying `payload` in IPv4/UDP from `src` to `dst`. Checksums are zero.
@@ -304,11 +307,11 @@ pub fn ethernet_ipv4_udp(src: SocketAddrV4, dst: SocketAddrV4, payload: &[u8]) -
 /// BVLC function BVLC-Result.
 const BVLC_RESULT: u8 = 0x00;
 
-/// BVLC function Register-Foreign-Device.
-const REGISTER_FOREIGN_DEVICE: u8 = 0x05;
-
 /// BVLC function Forwarded-NPDU.
 const FORWARDED_NPDU: u8 = 0x04;
+
+/// BVLC function Register-Foreign-Device.
+const REGISTER_FOREIGN_DEVICE: u8 = 0x05;
 
 /// BVLC function Original-Unicast-NPDU.
 const ORIGINAL_UNICAST: u8 = 0x0A;
@@ -347,8 +350,11 @@ fn i_am_with(function: u8, instance: u32) -> Vec<u8> {
     bvlc(function, &npdu)
 }
 
-/// The NPDU and APDU of a Who-Is with no device range.
-const WHO_IS_NPDU: [u8; 4] = [0x01, 0x00, 0x10, 0x08];
+/// The APDU of a Who-Is with no device range: unconfirmed request, service Who-Is (8).
+const WHO_IS_APDU: [u8; 2] = [0x10, 0x08];
+
+/// The same Who-Is behind a local NPDU with no options.
+const WHO_IS_NPDU: [u8; 4] = [0x01, 0x00, WHO_IS_APDU[0], WHO_IS_APDU[1]];
 
 /// A broadcast Who-Is with no device range: every device should answer.
 fn who_is() -> Vec<u8> {
@@ -373,7 +379,8 @@ fn routed_who_is(dnet: u16) -> Vec<u8> {
     // NPDU with a destination: network, zero-length address (broadcast there), hop count 255.
     let mut npdu = vec![0x01, 0x20];
     npdu.extend_from_slice(&dnet.to_be_bytes());
-    npdu.extend_from_slice(&[0x00, 0xFF, 0x10, 0x08]);
+    npdu.extend_from_slice(&[0x00, 0xFF]);
+    npdu.extend_from_slice(&WHO_IS_APDU);
     bvlc(ORIGINAL_UNICAST, &npdu)
 }
 
@@ -385,11 +392,12 @@ fn reject_message_to_network(dnet: u16) -> Vec<u8> {
     bvlc(ORIGINAL_UNICAST, &npdu)
 }
 
-/// A Forwarded-NPDU relaying `npdu`, first sent by `original_source`.
-fn forwarded(original_source: SocketAddrV4, npdu: &[u8]) -> Vec<u8> {
+/// A Forwarded-NPDU relaying the remote supervisor's broadcast Who-Is.
+fn forwarded_remote_who_is() -> Vec<u8> {
+    let original_source = addr(REMOTE_SUPERVISOR);
     let mut body = original_source.ip().octets().to_vec();
     body.extend_from_slice(&original_source.port().to_be_bytes());
-    body.extend_from_slice(npdu);
+    body.extend_from_slice(&WHO_IS_NPDU);
     bvlc(FORWARDED_NPDU, &body)
 }
 
