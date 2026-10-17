@@ -357,6 +357,48 @@ fn quiet_still_prints_the_capture_health_warning() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("Warning."));
 }
 
+/// The site's sample report comes from this capture, so it must show exactly these findings.
+#[test]
+fn sample_capture_produces_exactly_its_findings() {
+    use baccheck_core::report::IssueId;
+
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join("sample.pcap");
+    std::fs::write(&capture, baccheck_synth::sample_capture()).unwrap();
+
+    let out = baccheck(&[capture.as_os_str()]);
+
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("3 findings."), "{stdout}");
+    let report = std::fs::read_to_string(dir.path().join("sample.baccheck.html")).unwrap();
+    let expected = [
+        IssueId::DuplicateDeviceId,
+        IssueId::UnresponsiveDevice,
+        IssueId::ForeignDeviceRegistrationFailure,
+    ];
+    for issue in IssueId::ALL {
+        let name = issue.spec().display_name;
+        assert_eq!(
+            report.contains(name),
+            expected.contains(&issue),
+            "{name} in the report"
+        );
+    }
+}
+
+/// The generator is a development tool: the release binary must not link it.
+#[test]
+fn the_synthetic_capture_generator_is_a_dev_dependency_only() {
+    let manifest =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+    let (normal, dev) = manifest
+        .split_once("[dev-dependencies]")
+        .expect("a dev-dependencies table");
+    assert!(!normal.contains("baccheck-synth"), "in [dependencies]");
+    assert!(dev.contains("baccheck-synth"));
+}
+
 /// The binary makes no network calls. This guards the dependency list, not the call sites.
 #[test]
 fn the_lock_file_holds_no_network_client_crates() {

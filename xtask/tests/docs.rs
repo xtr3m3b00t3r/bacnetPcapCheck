@@ -61,14 +61,26 @@ fn seen_text(html: &str) -> String {
             text.replace_range(start..end, " ");
         }
     }
+    // A block-level tag separates text the way a browser lays it out (`</li><li>` is two
+    // lines); an inline tag does not, so a lost space before a link still shows.
+    const BLOCK: [&str; 13] = [
+        "p", "li", "ol", "ul", "div", "td", "th", "tr", "br", "h1", "h2", "h3", "section",
+    ];
     let mut out = String::with_capacity(text.len());
-    let mut in_tag = 0usize;
+    let mut tag: Option<String> = None;
     for c in text.chars() {
-        match c {
-            '<' => in_tag += 1,
-            '>' => in_tag = in_tag.saturating_sub(1),
-            _ if in_tag == 0 => out.push(c),
-            _ => {}
+        match (&mut tag, c) {
+            (None, '<') => tag = Some(String::new()),
+            (Some(name), '>') => {
+                let name = name.trim_start_matches('/');
+                let name = name.split([' ', '/']).next().unwrap_or("");
+                if BLOCK.contains(&name) {
+                    out.push(' ');
+                }
+                tag = None;
+            }
+            (Some(name), _) => name.push(c),
+            (None, _) => out.push(c),
         }
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -106,7 +118,7 @@ fn visible_text_is_clean() {
     // no stray non-ASCII glyph beyond the documented allowlist, and no lost whitespace
     // after sentence punctuation. Both failed once in real output (a stray CJK fragment
     // in a doc comment and "business.Benjamin"), which is what this test catches.
-    let pages = [landing(), manual()];
+    let pages = [landing(), manual(), sample_report()];
     for html in &pages {
         let text = seen_text(html);
         for c in text.chars() {
@@ -140,6 +152,11 @@ fn manual() -> String {
     build_site(docs_src()).expect("site builds")
 }
 
+/// The sample report: the real report rendered from the synthetic sample capture.
+fn sample_report() -> String {
+    xtask::docs::build_sample_report().expect("sample report builds")
+}
+
 #[test]
 fn site_holds_all_thirteen_pages() {
     assert_eq!(PAGES.len(), 13);
@@ -155,8 +172,8 @@ fn site_holds_all_thirteen_pages() {
 
 #[test]
 fn site_is_self_contained_and_subpath_safe() {
-    // Every page of the site: the landing page and the manual.
-    let pages = [landing(), manual()];
+    // Every page of the site: the landing page, the manual and the sample report.
+    let pages = [landing(), manual(), sample_report()];
     // Root-relative URLs break under the /bacnetPcapCheck/ GitHub Pages subpath, so no
     // page, stylesheet or script may use one.
     for forbidden in [
@@ -223,6 +240,12 @@ fn committed_site_matches_the_sources() {
         built == committed,
         "docs/manual.html is stale. Run `cargo xtask docs-build`."
     );
+    let committed = std::fs::read_to_string(docs_src().join("../sample-report.html"))
+        .expect("docs/sample-report.html is committed");
+    assert!(
+        sample_report() == committed,
+        "docs/sample-report.html is stale. Run `cargo xtask docs-build`."
+    );
 }
 
 #[test]
@@ -231,6 +254,10 @@ fn landing_page_says_what_it_is_and_links_to_manual_and_download() {
     // The manual and the download are both reachable from the landing page, at their new
     // locations. The download points at the releases page; the manual stays relative.
     assert!(page.contains("href=\"manual.html\""), "no manual link");
+    assert!(
+        page.contains("href=\"sample-report.html\""),
+        "no sample report link"
+    );
     assert!(
         page.contains("https://github.com/xtr3m3b00t3r/bacnetPcapCheck/releases"),
         "no download link"

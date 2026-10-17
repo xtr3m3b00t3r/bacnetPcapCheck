@@ -1,5 +1,6 @@
-//! `cargo xtask docs-build` writes the site: the landing page at `docs/index.html` and the
-//! self-contained manual at `docs/manual.html`, both from `docs/src/*.md` and the code.
+//! `cargo xtask docs-build` writes the site: the landing page at `docs/index.html`, the
+//! self-contained manual at `docs/manual.html` (both from `docs/src/*.md` and the code), and the
+//! sample report at `docs/sample-report.html` (from the synthetic sample capture).
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -15,7 +16,8 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Task {
-    /// Build the landing page (docs/index.html) and the manual (docs/manual.html)
+    /// Build the landing page (docs/index.html), the manual (docs/manual.html) and the sample
+    /// report (docs/sample-report.html)
     DocsBuild,
 }
 
@@ -39,10 +41,22 @@ fn main() -> ExitCode {
                 eprintln!("cannot write docs/manual.html: {e}");
                 return ExitCode::FAILURE;
             }
+            let sample = match xtask::docs::build_sample_report() {
+                Ok(sample) => sample,
+                Err(e) => {
+                    eprintln!("sample report failed: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = std::fs::write(root.join("docs/sample-report.html"), &sample) {
+                eprintln!("cannot write docs/sample-report.html: {e}");
+                return ExitCode::FAILURE;
+            }
             println!(
-                "wrote docs/index.html ({} KB), docs/manual.html ({} KB)",
+                "wrote docs/index.html ({} KB), docs/manual.html ({} KB), docs/sample-report.html ({} KB)",
                 landing.len() / 1024,
-                html.len() / 1024
+                html.len() / 1024,
+                sample.len() / 1024
             );
             ExitCode::SUCCESS
         }

@@ -1,0 +1,10 @@
+[package]
+name = "baccheck-synth"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Dev-only synthetic capture generator for the site demos. Never shipped in a release artifact."
+
+[dependencies]
+pcap-file = "2.0.0"

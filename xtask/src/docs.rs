@@ -6,7 +6,8 @@ use std::io;
 use std::path::Path;
 
 use baccheck_cli::cli::Cli;
-use baccheck_core::report::IssueId;
+use baccheck_core::analyse_capture;
+use baccheck_core::report::{render_html, IssueId};
 use clap::CommandFactory;
 use pulldown_cmark::{html, CowStr, Event, Options, Parser, Tag};
 
@@ -272,6 +273,11 @@ pub fn build_landing_page() -> String {
          It is one self-contained file, so it opens offline on an air-gapped network.</p>\n\
          </section>\n\
          <section>\n\
+         <h2>Sample report</h2>\n\
+         <p>This is the report BACcheck writes, from a synthetic capture with three findings.</p>\n\
+         <p><a href=\"sample-report.html\">Open the sample report</a></p>\n\
+         </section>\n\
+         <section>\n\
          <h2>Privacy</h2>\n\
          <p>This page makes no outbound calls: no analytics, no tracking, no external fonts \
          or scripts. What you read here never phones home.</p>\n\
@@ -290,6 +296,16 @@ pub fn build_landing_page() -> String {
          <a href=\"https://www.linkedin.com/in/benjamin-dw-truman/\" rel=\"noopener\">Benjamin D.W Truman</a>\
          </span></div></footer>\n</body>\n</html>\n"
     )
+}
+
+/// The sample report, at `sample-report.html` beside the landing page: the synthetic sample
+/// capture run through the same pipeline and renderer as the `baccheck` binary, no filter.
+pub fn build_sample_report() -> io::Result<String> {
+    let dir = tempfile::tempdir()?;
+    let capture = dir.path().join("sample.pcap");
+    std::fs::write(&capture, baccheck_synth::sample_capture())?;
+    let report = analyse_capture(&capture).map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(render_html(&report, None))
 }
 
 fn escape(text: &str) -> String {
