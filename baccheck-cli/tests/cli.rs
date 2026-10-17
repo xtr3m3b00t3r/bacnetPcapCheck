@@ -406,7 +406,9 @@ fn each_demo_capture_produces_exactly_its_own_finding() {
 
     // The evidence text and the severity pin each capture to the trigger it is built for: High is
     // two claiming IPs; the storm must fire on the Who-Is flood, not only on the broadcast share
-    // that makes it Critical; Medium is >50% of >=10 I-Ams unmatched.
+    // that makes it Critical; Medium is >50% of >=10 I-Ams unmatched. Duplicate BBMD is High on two
+    // forwarders; incomplete BDT is Low at its 50-broadcast floor; registration failure and routing
+    // rejection are High above five NAKs and ten rejections a minute.
     for (issue, trigger, severity, capture) in [
         (
             IssueId::DuplicateDeviceId,
@@ -425,6 +427,31 @@ fn each_demo_capture_produces_exactly_its_own_finding() {
             "10.0.0.12:47808 (12 of its I-Ams)",
             Severity::Medium,
             baccheck_synth::unicast_i_am_capture(),
+        ),
+        (
+            IssueId::DuplicateBbmd,
+            "12 sightings via 10.0.0.1:47808, 10.0.0.2:47808",
+            Severity::High,
+            baccheck_synth::duplicate_bbmd_capture(),
+        ),
+        (
+            IssueId::IncompleteBdt,
+            "10.1.0.1:47808 relayed 4 broadcast(s) into this segment, but none of the 50",
+            Severity::Low,
+            baccheck_synth::incomplete_bdt_capture(),
+        ),
+        (
+            IssueId::ForeignDeviceRegistrationFailure,
+            "8 Register-Foreign-Device request(s) were NAKed by the BBMD within 10 s: \
+             192.168.50.20:47808 (8 NAK(s))",
+            Severity::High,
+            baccheck_synth::foreign_device_registration_capture(),
+        ),
+        (
+            IssueId::RoutingRejection,
+            "10.0.0.30:47808 (12 rejection(s)). Busiest router: 12 in one 60 s bucket",
+            Severity::High,
+            baccheck_synth::routing_rejection_capture(),
         ),
     ] {
         let (out, report) = run_synthetic_capture("demo.pcap", capture);

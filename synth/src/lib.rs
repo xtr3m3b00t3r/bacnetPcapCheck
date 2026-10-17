@@ -125,6 +125,126 @@ pub fn broadcast_storm_capture() -> Vec<u8> {
     capture.into_pcap()
 }
 
+/// Rule 4 demo: two BBMDs, 10.0.0.1 and 10.0.0.2, both hold a BDT entry for remote network
+/// 10.1.0.0/24, so each relays the remote supervisor's Who-Is into this segment: every broadcast
+/// arrives twice, twelve sightings in all. Two forwarders make it High. The frames span under the
+/// rate rules' five-minute floor, so neither the loop trigger nor the storm rule may fire.
+pub fn duplicate_bbmd_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr(BROADCAST);
+    let remote_supervisor = addr("10.1.0.5");
+    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
+        capture.push(n, addr(ip), broadcast, &i_am(instance));
+    }
+    for round in 0..6u64 {
+        let at = Duration::from_secs(10 + round * 40);
+        capture.push_at(
+            at,
+            addr(SUPERVISOR),
+            broadcast,
+            &forwarded(remote_supervisor, &WHO_IS_NPDU),
+        );
+        capture.push_at(
+            at + Duration::from_millis(3),
+            addr("10.0.0.2"),
+            broadcast,
+            &forwarded(remote_supervisor, &WHO_IS_NPDU),
+        );
+    }
+    capture.into_pcap()
+}
+
+/// Rule 5 demo: peer BBMD 10.1.0.1 relays the remote supervisor's Who-Is into this segment once a
+/// minute, four times, but none of the fifty I-Ams that ten local devices broadcast (one a minute
+/// each, five rounds) ever comes back forwarded: the peer's BDT is missing this segment. Low, the
+/// rule's only severity. The frames span under five minutes, so the storm rule stays silent.
+pub fn incomplete_bdt_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr(BROADCAST);
+    for round in 0..5 {
+        for n in 0..10u8 {
+            let ip = std::net::Ipv4Addr::new(10, 0, 0, 11 + n);
+            capture.push(
+                round * 60 + u64::from(n),
+                SocketAddrV4::new(ip, 47808),
+                broadcast,
+                &i_am(1101 + u32::from(n)),
+            );
+        }
+    }
+    for n in 0..4 {
+        capture.push(
+            30 + n * 60,
+            addr("10.1.0.1"),
+            broadcast,
+            &forwarded(addr("10.1.0.5"), &WHO_IS_NPDU),
+        );
+    }
+    capture.into_pcap()
+}
+
+/// Rule 6 demo: foreign device 192.168.50.20 tries to register with the segment's BBMD every 30 s
+/// and is NAKed each time, eight in all: more than five makes it High. Foreign device
+/// 192.168.60.30 registers once and is accepted, which is not a finding.
+pub fn foreign_device_registration_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr(BROADCAST);
+    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
+        capture.push(n, addr(ip), broadcast, &i_am(instance));
+    }
+    capture.push(
+        5,
+        addr("192.168.60.30"),
+        addr(SUPERVISOR),
+        &register_foreign_device(300),
+    );
+    capture.push(6, addr(SUPERVISOR), addr("192.168.60.30"), &register_ack());
+    for n in 0..8 {
+        let at = 10 + n * 30;
+        capture.push(
+            at,
+            addr("192.168.50.20"),
+            addr(SUPERVISOR),
+            &register_foreign_device(60),
+        );
+        capture.push(
+            at + 1,
+            addr(SUPERVISOR),
+            addr("192.168.50.20"),
+            &register_nak(),
+        );
+    }
+    capture.into_pcap()
+}
+
+/// Rule 9 demo: the supervisor looks for devices on network 2001 through router 10.0.0.30 every
+/// 5 s, and the router, which has lost its route there, rejects each one: twelve rejections in the
+/// first minute, more than ten makes it High.
+pub fn routing_rejection_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    let broadcast = addr(BROADCAST);
+    let router = addr("10.0.0.30");
+    for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
+        capture.push(n, addr(ip), broadcast, &i_am(instance));
+    }
+    for n in 0..12 {
+        let at = 2 + n * 5;
+        capture.push(
+            at,
+            addr(SUPERVISOR),
+            router,
+            &routed_who_is(UNREACHABLE_NETWORK),
+        );
+        capture.push(
+            at + 1,
+            router,
+            addr(SUPERVISOR),
+            &reject_message_to_network(UNREACHABLE_NETWORK),
+        );
+    }
+    capture.into_pcap()
+}
+
 /// Frames in capture order, each with its offset from [`START_SECS`].
 #[derive(Default)]
 struct Capture {
@@ -187,6 +307,9 @@ const BVLC_RESULT: u8 = 0x00;
 /// BVLC function Register-Foreign-Device.
 const REGISTER_FOREIGN_DEVICE: u8 = 0x05;
 
+/// BVLC function Forwarded-NPDU.
+const FORWARDED_NPDU: u8 = 0x04;
+
 /// BVLC function Original-Unicast-NPDU.
 const ORIGINAL_UNICAST: u8 = 0x0A;
 
@@ -224,6 +347,9 @@ fn i_am_with(function: u8, instance: u32) -> Vec<u8> {
     bvlc(function, &npdu)
 }
 
+/// The NPDU and APDU of a Who-Is with no device range.
+const WHO_IS_NPDU: [u8; 4] = [0x01, 0x00, 0x10, 0x08];
+
 /// A broadcast Who-Is with no device range: every device should answer.
 fn who_is() -> Vec<u8> {
     who_is_with(ORIGINAL_BROADCAST)
@@ -236,7 +362,35 @@ fn directed_who_is() -> Vec<u8> {
 
 /// A Who-Is with no device range in a BVLC frame of `function`.
 fn who_is_with(function: u8) -> Vec<u8> {
-    bvlc(function, &[0x01, 0x00, 0x10, 0x08])
+    bvlc(function, &WHO_IS_NPDU)
+}
+
+/// The remote BACnet network the routing demo's router can no longer reach.
+const UNREACHABLE_NETWORK: u16 = 2001;
+
+/// A Who-Is with no device range, sent unicast to a router for broadcast on network `dnet`.
+fn routed_who_is(dnet: u16) -> Vec<u8> {
+    // NPDU with a destination: network, zero-length address (broadcast there), hop count 255.
+    let mut npdu = vec![0x01, 0x20];
+    npdu.extend_from_slice(&dnet.to_be_bytes());
+    npdu.extend_from_slice(&[0x00, 0xFF, 0x10, 0x08]);
+    bvlc(ORIGINAL_UNICAST, &npdu)
+}
+
+/// Reject-Message-To-Network (0x03) for network `dnet`, reason 1: no route to it.
+fn reject_message_to_network(dnet: u16) -> Vec<u8> {
+    // NPDU carrying a network-layer message, then message type, reason, network.
+    let mut npdu = vec![0x01, 0x80, 0x03, 0x01];
+    npdu.extend_from_slice(&dnet.to_be_bytes());
+    bvlc(ORIGINAL_UNICAST, &npdu)
+}
+
+/// A Forwarded-NPDU relaying `npdu`, first sent by `original_source`.
+fn forwarded(original_source: SocketAddrV4, npdu: &[u8]) -> Vec<u8> {
+    let mut body = original_source.ip().octets().to_vec();
+    body.extend_from_slice(&original_source.port().to_be_bytes());
+    body.extend_from_slice(npdu);
+    bvlc(FORWARDED_NPDU, &body)
 }
 
 /// A unicast ReadProperty of device `instance`'s Object_Name (property 77).
@@ -251,6 +405,11 @@ fn read_property(invoke_id: u8, instance: u32) -> Vec<u8> {
 /// Register-Foreign-Device with a time-to-live of `ttl_secs`.
 fn register_foreign_device(ttl_secs: u16) -> Vec<u8> {
     bvlc(REGISTER_FOREIGN_DEVICE, &ttl_secs.to_be_bytes())
+}
+
+/// BVLC-Result 0x0000: Successful completion.
+fn register_ack() -> Vec<u8> {
+    bvlc(BVLC_RESULT, &[0x00, 0x00])
 }
 
 /// BVLC-Result 0x0030: Register-Foreign-Device NAK.
