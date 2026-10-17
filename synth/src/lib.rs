@@ -12,6 +12,12 @@ use pcap_file::pcap::{PcapPacket, PcapWriter};
 /// Capture start: Friday 4 September 2026, 09:00:00 UTC.
 const START_SECS: u64 = 1_788_512_400;
 
+/// The directed broadcast of the demo segment, 10.0.0.0/24.
+const BROADCAST: &str = "10.0.0.255";
+
+/// The segment's supervisor, and in the sample capture its BBMD.
+const SUPERVISOR: &str = "10.0.0.1";
+
 /// The sample capture's file name. It shows in the report, so the site's copy and the binary's
 /// must use the same one.
 pub const SAMPLE_CAPTURE_NAME: &str = "sample.pcap";
@@ -21,7 +27,7 @@ pub const SAMPLE_CAPTURE_NAME: &str = "sample.pcap";
 /// ReadProperty requests, and a foreign device whose BBMD NAKs every registration.
 pub fn sample_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr("10.0.0.255");
+    let broadcast = addr(BROADCAST);
 
     capture.push(0, addr("10.0.0.5"), broadcast, &i_am(101));
     capture.push(1, addr("10.0.0.6"), broadcast, &i_am(101));
@@ -43,12 +49,12 @@ pub fn sample_capture() -> Vec<u8> {
         capture.push(
             at,
             addr("192.168.50.20"),
-            addr("10.0.0.1"),
+            addr(SUPERVISOR),
             &register_foreign_device(60),
         );
         capture.push(
             at + 1,
-            addr("10.0.0.1"),
+            addr(SUPERVISOR),
             addr("192.168.50.20"),
             &register_nak(),
         );
@@ -62,7 +68,7 @@ pub fn sample_capture() -> Vec<u8> {
 /// five-minute span floor, so the storm rule stays silent.
 pub fn duplicate_device_id_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr("10.0.0.255");
+    let broadcast = addr(BROADCAST);
     let devices = [
         ("10.0.0.5", 101),
         ("10.0.0.6", 101),
@@ -83,8 +89,7 @@ pub fn duplicate_device_id_capture() -> Vec<u8> {
 /// devices announce themselves by broadcast.
 pub fn unicast_i_am_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr("10.0.0.255");
-    let supervisor = addr("10.0.0.1");
+    let broadcast = addr(BROADCAST);
     for (n, (ip, instance)) in (0u64..).zip([("10.0.0.7", 202), ("10.0.0.8", 303)]) {
         capture.push(n, addr(ip), broadcast, &i_am(instance));
     }
@@ -92,12 +97,12 @@ pub fn unicast_i_am_capture() -> Vec<u8> {
         capture.push(
             5 + n * 30,
             addr("10.0.0.12"),
-            supervisor,
+            addr(SUPERVISOR),
             &unicast_i_am(1200),
         );
     }
-    capture.push(100, supervisor, addr("10.0.0.7"), &directed_who_is());
-    capture.push(101, addr("10.0.0.7"), supervisor, &unicast_i_am(202));
+    capture.push(100, addr(SUPERVISOR), addr("10.0.0.7"), &directed_who_is());
+    capture.push(101, addr("10.0.0.7"), addr(SUPERVISOR), &unicast_i_am(202));
     capture.into_pcap()
 }
 
@@ -107,9 +112,9 @@ pub fn unicast_i_am_capture() -> Vec<u8> {
 /// fires as well and the share above 50% makes it Critical, as a real Who-Is storm would.
 pub fn broadcast_storm_capture() -> Vec<u8> {
     let mut capture = Capture::default();
-    let broadcast = addr("10.0.0.255");
+    let broadcast = addr(BROADCAST);
     for minute in 0..=6 {
-        capture.push(minute * 60, addr("10.0.0.1"), broadcast, &who_is());
+        capture.push(minute * 60, addr(SUPERVISOR), broadcast, &who_is());
     }
     for tick in 0..240u64 {
         let at = Duration::from_secs(120) + Duration::from_millis(tick * 250);
@@ -176,6 +181,12 @@ pub fn ethernet_ipv4_udp(src: SocketAddrV4, dst: SocketAddrV4, payload: &[u8]) -
     frame
 }
 
+/// BVLC function BVLC-Result.
+const BVLC_RESULT: u8 = 0x00;
+
+/// BVLC function Register-Foreign-Device.
+const REGISTER_FOREIGN_DEVICE: u8 = 0x05;
+
 /// BVLC function Original-Unicast-NPDU.
 const ORIGINAL_UNICAST: u8 = 0x0A;
 
@@ -239,10 +250,10 @@ fn read_property(invoke_id: u8, instance: u32) -> Vec<u8> {
 
 /// Register-Foreign-Device with a time-to-live of `ttl_secs`.
 fn register_foreign_device(ttl_secs: u16) -> Vec<u8> {
-    bvlc(0x05, &ttl_secs.to_be_bytes())
+    bvlc(REGISTER_FOREIGN_DEVICE, &ttl_secs.to_be_bytes())
 }
 
 /// BVLC-Result 0x0030: Register-Foreign-Device NAK.
 fn register_nak() -> Vec<u8> {
-    bvlc(0x00, &[0x00, 0x30])
+    bvlc(BVLC_RESULT, &[0x00, 0x30])
 }

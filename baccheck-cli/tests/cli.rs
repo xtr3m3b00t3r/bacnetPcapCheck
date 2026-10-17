@@ -365,6 +365,7 @@ fn assert_exactly_these_findings(
 ) {
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!expected.is_empty(), "a clean run exits 0, not 1");
     let count = match expected.len() {
         1 => "1 finding.".to_string(),
         n => format!("{n} findings."),
@@ -401,34 +402,47 @@ fn sample_capture_produces_exactly_its_findings() {
 /// Each per-detector demo capture triggers its own detector and no other (spec #30, story 18).
 #[test]
 fn each_demo_capture_produces_exactly_its_own_finding() {
-    use baccheck_core::report::IssueId;
+    use baccheck_core::report::{IssueId, Severity};
 
-    // The severity pins each capture to the trigger it is built for: High is two claiming IPs,
-    // Critical is the storm's >50% broadcast share, Medium is >50% of >=10 I-Ams unmatched.
-    for (issue, severity, capture) in [
+    // The evidence text and the severity pin each capture to the trigger it is built for: High is
+    // two claiming IPs; the storm must fire on the Who-Is flood, not only on the broadcast share
+    // that makes it Critical; Medium is >50% of >=10 I-Ams unmatched.
+    for (issue, trigger, severity, capture) in [
         (
             IssueId::DuplicateDeviceId,
-            "HIGH",
+            "claimed from 2 different addresses",
+            Severity::High,
             baccheck_synth::duplicate_device_id_capture(),
         ),
         (
             IssueId::BroadcastStorm,
-            "CRITICAL",
+            "global Who-Is flood: peak 12.0/s",
+            Severity::Critical,
             baccheck_synth::broadcast_storm_capture(),
         ),
         (
             IssueId::UnicastIAm,
-            "MEDIUM",
+            "10.0.0.12:47808 (12 of its I-Ams)",
+            Severity::Medium,
             baccheck_synth::unicast_i_am_capture(),
         ),
     ] {
         let (out, report) = run_synthetic_capture("demo.pcap", capture);
         assert_exactly_these_findings(&out, &report, &[issue]);
-        for tag in ["CRITICAL", "HIGH", "MEDIUM", "LOW"] {
+        assert!(
+            report.contains(trigger),
+            "{trigger:?} in the {issue:?} report"
+        );
+        for tag in [
+            Severity::Low,
+            Severity::Medium,
+            Severity::High,
+            Severity::Critical,
+        ] {
             assert_eq!(
-                report.contains(&format!("rpt-sev\">{tag}<")),
+                report.contains(&format!("rpt-sev\">{}<", tag.label().to_uppercase())),
                 tag == severity,
-                "{tag} tag in the {issue:?} report"
+                "{tag:?} tag in the {issue:?} report"
             );
         }
     }
