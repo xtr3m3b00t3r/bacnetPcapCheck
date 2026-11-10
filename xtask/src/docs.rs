@@ -247,7 +247,7 @@ pub fn build_site(src_dir: &Path) -> io::Result<String> {
 
 /// The landing page, the site root at `index.html`. Says what BACcheck is on one screen,
 /// links to the manual (relative, so it works on the Pages subpath) and the download,
-/// introduces the author, and states the no-outbound-calls rule.
+/// links to the series index, introduces the author, and states the no-outbound-calls rule.
 pub fn build_landing_page() -> String {
     const LINKEDIN: &str = "https://www.linkedin.com/in/benjamin-dw-truman/";
     let mut out = String::new();
@@ -296,6 +296,17 @@ pub fn build_landing_page() -> String {
             "<p>The manual walks through the first capture, the report format, the ten issue types",
             "and their remediation steps: <a href=\"manual.html\">BACcheck documentation</a>.",
             "It is one self-contained file, so it opens offline on an air-gapped network.</p>",
+        ],
+    );
+    let _ = writeln!(out, "</section>");
+    let _ = writeln!(out, "<section>");
+    let _ = writeln!(out, "<h2>The series</h2>");
+    prose(
+        &mut out,
+        &[
+            "<p>Every week, a short post on what building automation can learn from software",
+            "engineering. Each idea is tested against BACcheck before it is published:",
+            "<a href=\"series/index.html\">Read the series</a>.</p>",
         ],
     );
     let _ = writeln!(out, "</section>");

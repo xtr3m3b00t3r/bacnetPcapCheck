@@ -170,49 +170,104 @@ fn site_holds_all_thirteen_pages() {
     }
 }
 
-#[test]
-fn site_is_self_contained_and_subpath_safe() {
-    // Every page of the site: the landing page, the manual and the sample report.
-    let pages = [landing(), manual(), sample_report()];
-    // Root-relative URLs break under the /bacnetPcapCheck/ GitHub Pages subpath, so no
-    // page, stylesheet or script may use one.
-    for forbidden in [
-        "href=\"/",
-        "src=\"/",
-        "srcset=\"/",
-        "href='/",
-        "src='/",
-        "url(/",
-        "url('/",
-        "url(\"/",
-    ] {
-        for html in &pages {
-            assert!(
-                !html.contains(forbidden),
-                "found root-relative URL ({forbidden})"
-            );
+/// URL forms that break under the /bacnetPcapCheck/ GitHub Pages subpath: no page,
+/// stylesheet or script may use a root-relative URL.
+const ROOT_RELATIVE: [&str; 8] = [
+    "href=\"/",
+    "src=\"/",
+    "srcset=\"/",
+    "href='/",
+    "src='/",
+    "url(/",
+    "url('/",
+    "url(\"/",
+];
+
+/// Resource loads from another origin. Hyperlinks (<a href="https://…") are fine; the
+/// footer's LinkedIn link is one. Analytics and tracking elements are covered here too:
+/// they all load from another origin.
+const EXTERNAL_RESOURCE: [&str; 10] = [
+    "<script src=",
+    "<link ",
+    "<img ",
+    "<iframe",
+    "<embed",
+    "<object",
+    "@import",
+    "url(http",
+    "src='http",
+    "src=\"http",
+];
+
+/// The first offline rule a page breaks, if any. Shared by the guard so the same rules
+/// cover the built pages and the committed series pages.
+fn offline_violation(html: &str) -> Option<String> {
+    for forbidden in ROOT_RELATIVE {
+        if html.contains(forbidden) {
+            return Some(format!("root-relative URL ({forbidden})"));
         }
     }
-    // Resource loads from another origin. Hyperlinks (<a href="https://…") are fine; the
-    // footer's LinkedIn link is one. Analytics and tracking elements are covered above too:
-    // they all load from another origin.
-    for forbidden in [
-        "<script src=",
-        "<link ",
-        "<img ",
-        "<iframe",
-        "<embed",
-        "<object",
-        "@import",
-        "url(http",
-        "src='http",
-        "src=\"http",
+    for forbidden in EXTERNAL_RESOURCE {
+        if html.contains(forbidden) {
+            return Some(format!("external resource ({forbidden})"));
+        }
+    }
+    None
+}
+
+/// Every committed page under `docs/series`: the index and any mirrored post, by name.
+fn committed_series_pages() -> Vec<(String, String)> {
+    let dir = docs_src().join("../series");
+    let mut pages = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("docs/series is committed") {
+        let path = entry.expect("series entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("html") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("series page has a name")
+            .to_string();
+        let html = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        pages.push((name, html));
+    }
+    pages.sort();
+    pages
+}
+
+#[test]
+fn site_is_self_contained_and_subpath_safe() {
+    // Every page of the site: the landing page, the manual, the sample report, and every
+    // committed page under docs/series.
+    let series = committed_series_pages();
+    assert!(
+        series.iter().any(|(name, _)| name == "index.html"),
+        "docs/series/index.html was not read"
+    );
+    let mut pages = vec![
+        ("landing page".to_string(), landing()),
+        ("manual".to_string(), manual()),
+        ("sample report".to_string(), sample_report()),
+    ];
+    pages.extend(series);
+
+    // Prove the guard is live rather than passing because it checks nothing: each class
+    // of forbidden URL is caught by the same rules the pages run through.
+    for sample in [
+        "<a href=\"/bacnetPcapCheck/manual.html\">manual</a>",
+        "<script src=\"https://example.com/app.js\"></script>",
     ] {
-        for html in &pages {
-            assert!(
-                !html.contains(forbidden),
-                "found external resource ({forbidden})"
-            );
+        assert!(
+            offline_violation(sample).is_some(),
+            "the guard misses {sample}"
+        );
+    }
+
+    for (name, html) in &pages {
+        if let Some(violation) = offline_violation(html) {
+            panic!("{name}: found {violation}");
         }
     }
 }
@@ -257,6 +312,11 @@ fn landing_page_says_what_it_is_and_links_to_manual_and_download() {
     assert!(
         page.contains("href=\"sample-report.html\""),
         "no sample report link"
+    );
+    // The series index is reachable too, and by a relative link under the subpath.
+    assert!(
+        page.contains("href=\"series/index.html\""),
+        "no series index link"
     );
     assert!(
         page.contains("https://github.com/xtr3m3b00t3r/bacnetPcapCheck/releases"),
