@@ -467,6 +467,12 @@ fn forwarded_remote_who_is() -> Vec<u8> {
     bvlc(FORWARDED_NPDU, &body)
 }
 
+// Wire format for the APDU helpers below, which build frames byte by byte. An NPDU is
+// `version (0x01)`, control, then the APDU. The APDU starts with a nibble for the PDU type
+// (0 ConfirmedRequest, 1 UnconfirmedRequest, 2 SimpleAck) and, for requests, control flags:
+// segmented 0x08, more-follows 0x04, segmented-response-accepted 0x02. `bacnet-rs` is the
+// authority (`src/app/mod.rs`, `src/network/mod.rs`), not this comment.
+
 /// A unicast ReadProperty of device `instance`'s Object_Name (property 77).
 fn read_property(invoke_id: u8, instance: u32) -> Vec<u8> {
     // NPDU expecting a reply; confirmed request, max APDU 1476, ReadProperty (12).
