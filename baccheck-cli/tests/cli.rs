@@ -408,8 +408,10 @@ fn each_demo_capture_produces_exactly_its_own_finding() {
     // two claiming IPs; the storm must fire on the Who-Is flood, not only on the broadcast share
     // that makes it Critical; Medium is >50% of >=10 I-Ams unmatched. Duplicate BBMD is High on two
     // forwarders; incomplete BDT is Low at its 50-broadcast floor; registration failure and routing
-    // rejection are High above five NAKs and ten rejections a minute.
-    for (issue, trigger, severity, capture) in [
+    // rejection are High above five NAKs and ten rejections a minute. Unresponsive device is High:
+    // zero of twelve answered; segmentation misuse is Medium at three abandoned exchanges for one
+    // directed pair; confirmed-service retransmission is High at ten repeats of fifteen frames.
+    let cases = [
         (
             IssueId::DuplicateDeviceId,
             "claimed from 2 different addresses",
@@ -453,7 +455,42 @@ fn each_demo_capture_produces_exactly_its_own_finding() {
             Severity::High,
             baccheck_synth::routing_rejection_capture(),
         ),
-    ] {
+        (
+            IssueId::UnresponsiveDevice,
+            "10.0.0.9:47808 answered 0% of the 12 confirmed requests sent to it \
+             (12 unanswered within 10 s)",
+            Severity::High,
+            baccheck_synth::unresponsive_device_capture(),
+        ),
+        (
+            IssueId::SegmentationMisuse,
+            "10.0.0.5:47808 to 10.0.0.9:47808 (3 of 3 abandoned)",
+            Severity::Medium,
+            baccheck_synth::segmentation_misuse_capture(),
+        ),
+        (
+            IssueId::ConfirmedServiceRetransmission,
+            "10.0.0.1:47808 repeated 10 of its 15 confirmed requests (67%) before any answer \
+             arrived",
+            Severity::High,
+            baccheck_synth::confirmed_service_retransmission_capture(),
+        ),
+    ];
+    // One demo capture per issue, no duplicates: a dropped row must fail, not silently skip.
+    assert_eq!(
+        cases.len(),
+        IssueId::ALL.len(),
+        "one demo capture per issue"
+    );
+    for issue in IssueId::ALL {
+        assert_eq!(
+            cases.iter().filter(|(row, ..)| *row == issue).count(),
+            1,
+            "exactly one demo capture for {issue:?}"
+        );
+    }
+
+    for (issue, trigger, severity, capture) in cases {
         let (out, report) = run_synthetic_capture("demo.pcap", capture);
         assert_exactly_these_findings(&out, &report, &[issue]);
         assert!(

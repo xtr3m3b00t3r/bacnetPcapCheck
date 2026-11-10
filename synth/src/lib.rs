@@ -240,6 +240,72 @@ pub fn routing_rejection_capture() -> Vec<u8> {
     capture.into_pcap()
 }
 
+/// Rule 3 demo: the supervisor sends twelve ReadProperty requests to device 10.0.0.9, five
+/// seconds apart, and none is ever answered: 0% answered over the floor of ten makes it High.
+/// Distinct invoke IDs keep the retransmission rule silent; nothing is segmented.
+pub fn unresponsive_device_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    capture.announce_bystanders();
+    for n in 0..12u8 {
+        capture.push(
+            10 + u64::from(n) * 5,
+            addr(SUPERVISOR),
+            addr("10.0.0.9"),
+            &read_property(n + 1, 303),
+        );
+    }
+    capture.into_pcap()
+}
+
+/// Rule 7 demo: device 10.0.0.5 opens three segmented ReadProperty exchanges toward 10.0.0.9, ten
+/// seconds apart, and never sends a final segment, abort or reject. The capture runs well past the
+/// 30 s abandon window after the last segment, so all three count as abandoned: at the rule's floor
+/// of three for one directed pair, which makes it Medium. Fewer than ten judged exchanges keeps the
+/// ratio trigger, and the unresponsive rule's floor, out of reach.
+pub fn segmentation_misuse_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    capture.announce_bystanders();
+    for n in 0..3u8 {
+        capture.push(
+            10 + u64::from(n) * 10,
+            addr("10.0.0.5"),
+            addr("10.0.0.9"),
+            &segmented_read_property(n + 1),
+        );
+    }
+    capture.push(100, addr("10.0.0.10"), addr(BROADCAST), &i_am(404));
+    capture.into_pcap()
+}
+
+/// Rule 10 demo: the supervisor sends five ReadProperty requests to device 10.0.0.9, each
+/// retransmitted twice a second apart before the device answers. That is fifteen confirmed request
+/// frames, ten of them repeats: 67% against a High trigger of 50%. Each request is answered within
+/// the response window, so the unresponsive rule stays silent; five requests are also under its
+/// floor of ten.
+pub fn confirmed_service_retransmission_capture() -> Vec<u8> {
+    let mut capture = Capture::default();
+    capture.announce_bystanders();
+    for n in 0..5u8 {
+        let at = 10 + u64::from(n) * 10;
+        let invoke_id = n + 1;
+        for repeat in 0..3u64 {
+            capture.push(
+                at + repeat,
+                addr(SUPERVISOR),
+                addr("10.0.0.9"),
+                &read_property(invoke_id, 303),
+            );
+        }
+        capture.push(
+            at + 3,
+            addr("10.0.0.9"),
+            addr(SUPERVISOR),
+            &read_property_ack(invoke_id),
+        );
+    }
+    capture.into_pcap()
+}
+
 /// Frames in capture order, each with its offset from [`START_SECS`].
 #[derive(Default)]
 struct Capture {
@@ -408,6 +474,22 @@ fn read_property(invoke_id: u8, instance: u32) -> Vec<u8> {
     npdu.extend_from_slice(&device_object_id(instance));
     npdu.extend_from_slice(&[0x19, 0x4D]);
     bvlc(ORIGINAL_UNICAST, &npdu)
+}
+
+/// A SimpleAck to a ReadProperty with `invoke_id`.
+fn read_property_ack(invoke_id: u8) -> Vec<u8> {
+    // NPDU with no options; SimpleAck (2), invoke ID, ReadProperty (12).
+    bvlc(ORIGINAL_UNICAST, &[0x01, 0x00, 0x20, invoke_id, 0x0C])
+}
+
+/// An opening segment of a segmented ReadProperty of device 303: more-follows set, sequence 0.
+fn segmented_read_property(invoke_id: u8) -> Vec<u8> {
+    // NPDU expecting a reply: confirmed request, segmented and more-follows, max APDU 1476,
+    // invoke ID, sequence number, window size, ReadProperty (12).
+    bvlc(
+        ORIGINAL_UNICAST,
+        &[0x01, 0x04, 0x0C, 0x05, invoke_id, 0x00, 0x01, 0x0C],
+    )
 }
 
 /// Register-Foreign-Device with a time-to-live of `ttl_secs`.
