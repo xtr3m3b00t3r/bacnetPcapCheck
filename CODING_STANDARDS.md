@@ -17,5 +17,6 @@ Judgement calls only. Formatting, lints and tests are enforced by `.githooks/pre
 - Test detectors at the `fn(&[DecodeRecord], …) -> Vec<Finding>` seam with synthetic records. Build them from `tests/common/mod.rs`; add a builder there when a second test file wants it.
 - Per detector: one fixture that fires, one below the evidence floor that stays silent, and the severity-escalation case.
 - Correlating detectors get a reused-key-after-silence case and a segmented-frame case.
+- A segmentation fixture also feeds the unresponsive correlation: segmented ConfirmedRequests count there (the retransmission rule ignores them). Keep its judged exchanges under the unresponsive floor, or answer them.
 - Adding a guard test: find the suite test that already guards the same property and extend it, never add a parallel test whose forbidden list is a superset of the old one.
 - Generated HTML is written line by line (`writeln!` per line or an explicit-seam helper), never as one escaped-newline blob: blobs swallow spaces at line joins and are where text glitches hide.
